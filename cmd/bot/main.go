@@ -58,7 +58,7 @@ func run() error {
 	}()
 
 	// Initialize components
-	aggregator, strategyEngine, orderManager, riskManager, err := initializeBot(ctx)
+	aggregator, strategyEngine, orderManager, riskManager, err := initializeBot()
 	if err != nil {
 		return fmt.Errorf("failed to initialize bot: %w", err)
 	}
@@ -99,7 +99,7 @@ func run() error {
 }
 
 // initializeBot initializes all bot components
-func initializeBot(ctx context.Context) (
+func initializeBot() (
 	*exchanges.MultiExchangeAggregator,
 	*strategy.ScalpingStrategy,
 	*order.Manager,

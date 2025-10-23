@@ -215,3 +215,26 @@ func TestIsWithinRange(t *testing.T) {
 		})
 	}
 }
+
+func BenchmarkStandardDeviation(b *testing.B) {
+	// Generate large dataset
+	values := make([]decimal.Decimal, 10000)
+	for i := 0; i < 10000; i++ {
+		values[i] = decimal.NewFromFloat(100 + float64(i)*0.1)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		StandardDeviation(values)
+	}
+}
+
+func BenchmarkPercentChange(b *testing.B) {
+	oldValue := decimal.NewFromFloat(100)
+	newValue := decimal.NewFromFloat(105)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		PercentChange(oldValue, newValue)
+	}
+}

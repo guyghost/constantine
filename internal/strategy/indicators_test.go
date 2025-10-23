@@ -193,6 +193,58 @@ func TestVWAP(t *testing.T) {
 	}
 }
 
+func BenchmarkEMA(b *testing.B) {
+	// Generate large price series
+	prices := make([]decimal.Decimal, 10000)
+	for i := 0; i < 10000; i++ {
+		prices[i] = decimal.NewFromFloat(100 + float64(i)*0.1)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		EMA(prices, 20)
+	}
+}
+
+func BenchmarkRSI(b *testing.B) {
+	// Generate large price series
+	prices := make([]decimal.Decimal, 10000)
+	for i := 0; i < 10000; i++ {
+		prices[i] = decimal.NewFromFloat(100 + float64(i)*0.1)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		RSI(prices, 14)
+	}
+}
+
+func BenchmarkBollingerBands(b *testing.B) {
+	// Generate large price series
+	prices := make([]decimal.Decimal, 10000)
+	for i := 0; i < 10000; i++ {
+		prices[i] = decimal.NewFromFloat(100 + float64(i)*0.1)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		BollingerBands(prices, 20, 2.0)
+	}
+}
+
+func BenchmarkSMA(b *testing.B) {
+	// Generate large price series
+	prices := make([]decimal.Decimal, 10000)
+	for i := 0; i < 10000; i++ {
+		prices[i] = decimal.NewFromFloat(100 + float64(i)*0.1)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		SMA(prices, 20)
+	}
+}
+
 func TestStochastic(t *testing.T) {
 	high := []decimal.Decimal{
 		decimal.NewFromFloat(127.01),

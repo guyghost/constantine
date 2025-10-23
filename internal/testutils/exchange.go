@@ -204,7 +204,7 @@ func (t *TestExchange) SupportedSymbols() []string {
 }
 
 // AssertEqual is a helper function for asserting equality in tests
-func AssertEqual(t *testing.T, expected, actual interface{}, message string) {
+func AssertEqual(t *testing.T, expected, actual any, message string) {
 	t.Helper()
 	if expected != actual {
 		t.Errorf("%s: expected %v, got %v", message, expected, actual)
@@ -228,7 +228,7 @@ func AssertFalse(t *testing.T, condition bool, message string) {
 }
 
 // AssertNil is a helper function for asserting nil values
-func AssertNil(t *testing.T, value interface{}, message string) {
+func AssertNil(t *testing.T, value any, message string) {
 	t.Helper()
 	if value != nil {
 		t.Errorf("%s: expected nil, got %v", message, value)
@@ -236,7 +236,7 @@ func AssertNil(t *testing.T, value interface{}, message string) {
 }
 
 // AssertNotNil is a helper function for asserting non-nil values
-func AssertNotNil(t *testing.T, value interface{}, message string) {
+func AssertNotNil(t *testing.T, value any, message string) {
 	t.Helper()
 	if value == nil {
 		t.Errorf("%s: expected non-nil value, got nil", message)

@@ -61,11 +61,11 @@ func NewClientWithMnemonic(mnemonic string, subAccountNumber int) (*Client, erro
 	signer := NewSigner(wallet)
 
 	c := &Client{
-		mnemonic:  mnemonic,
-		baseURL:   dydxAPIURL,
-		wsURL:     dydxWSURL,
-		wallet:    wallet,
-		signer:    signer,
+		mnemonic: mnemonic,
+		baseURL:  dydxAPIURL,
+		wsURL:    dydxWSURL,
+		wallet:   wallet,
+		signer:   signer,
 	}
 	c.httpClient = NewHTTPClient(c.baseURL, "", "")
 	return c, nil
@@ -204,15 +204,15 @@ func (c *Client) GetCandles(ctx context.Context, symbol string, interval string,
 	}
 
 	candles := make([]exchanges.Candle, 0, len(resp.Candles))
-	for _, c := range resp.Candles {
+	for i := range resp.Candles {
 		candles = append(candles, exchanges.Candle{
 			Symbol:    symbol,
-			Timestamp: c.StartedAt,
-			Open:      c.Open,
-			High:      c.High,
-			Low:       c.Low,
-			Close:     c.Close,
-			Volume:    c.BaseTokenVolume,
+			Timestamp: resp.Candles[i].StartedAt,
+			Open:      resp.Candles[i].Open,
+			High:      resp.Candles[i].High,
+			Low:       resp.Candles[i].Low,
+			Close:     resp.Candles[i].Close,
+			Volume:    resp.Candles[i].BaseTokenVolume,
 		})
 	}
 

@@ -38,7 +38,7 @@ func NewHTTPClient(baseURL, apiKey, apiSecret string) *HTTPClient {
 }
 
 // doRequest performs an HTTP request
-func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body interface{}, result interface{}) error {
+func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body any, result any) error {
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)

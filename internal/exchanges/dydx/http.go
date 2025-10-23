@@ -31,7 +31,7 @@ func NewHTTPClient(baseURL, apiKey, apiSecret string) *HTTPClient {
 }
 
 // doRequest performs an HTTP request
-func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body interface{}, result interface{}) error {
+func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body any, result any) error {
 	var reqBody io.Reader
 	if body != nil {
 		jsonData, err := json.Marshal(body)
@@ -84,16 +84,16 @@ func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body in
 }
 
 // get performs a GET request
-func (c *HTTPClient) get(ctx context.Context, path string, result interface{}) error {
+func (c *HTTPClient) get(ctx context.Context, path string, result any) error {
 	return c.doRequest(ctx, http.MethodGet, path, nil, result)
 }
 
 // post performs a POST request
-func (c *HTTPClient) post(ctx context.Context, path string, body interface{}, result interface{}) error {
+func (c *HTTPClient) post(ctx context.Context, path string, body any, result any) error {
 	return c.doRequest(ctx, http.MethodPost, path, body, result)
 }
 
 // delete performs a DELETE request
-func (c *HTTPClient) delete(ctx context.Context, path string, result interface{}) error {
+func (c *HTTPClient) delete(ctx context.Context, path string, result any) error {
 	return c.doRequest(ctx, http.MethodDelete, path, nil, result)
 }

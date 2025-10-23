@@ -24,7 +24,7 @@ func NewSigner(wallet *Wallet) *Signer {
 }
 
 // SignRequest signs a request with the wallet's private key
-func (s *Signer) SignRequest(method, path string, body interface{}) (string, string, error) {
+func (s *Signer) SignRequest(method, path string, body any) (string, string, error) {
 	// Generate timestamp
 	timestamp := time.Now().UTC().Format(time.RFC3339)
 
@@ -80,8 +80,8 @@ func (s *Signer) SignOrderPlacement(order *OrderRequest) (map[string]string, err
 
 	// Return headers
 	headers := map[string]string{
-		"DYDX-SIGNATURE":  signature,
-		"DYDX-TIMESTAMP":  strconv.FormatInt(time.Now().Unix(), 10),
+		"DYDX-SIGNATURE":        signature,
+		"DYDX-TIMESTAMP":        strconv.FormatInt(time.Now().Unix(), 10),
 		"DYDX-ETHEREUM-ADDRESS": s.wallet.Address,
 	}
 

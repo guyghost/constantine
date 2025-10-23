@@ -266,3 +266,44 @@ func TestEngine_CalculateMetrics_WithTrades(t *testing.T) {
 	testutils.AssertTrue(t, metrics.TotalLoss.Equal(decimal.NewFromFloat(50)), "Total loss should be 50")
 	testutils.AssertEqual(t, 0.5, metrics.WinRate.Div(decimal.NewFromInt(100)).InexactFloat64(), "Win rate should be 0.5")
 }
+
+func TestEngine_Integration_FullBacktest(t *testing.T) {
+	// Integration test: Load data, run full backtest, verify results
+	config := DefaultBacktestConfig()
+	config.InitialCapital = decimal.NewFromFloat(10000)
+
+	// Generate sample data
+	dataLoader := NewDataLoader()
+	data := dataLoader.GenerateSampleData("BTC-USD", time.Now().Add(-24*time.Hour), 100, 50000)
+	testutils.AssertNotNil(t, data, "Data should not be nil")
+	testutils.AssertTrue(t, len(data.Candles) > 0, "Should have candles")
+
+	// Create engine
+	engine := NewEngine(config, data)
+
+	// Create strategy config
+	strategyConfig := strategy.DefaultConfig()
+	strategyConfig.Symbol = "BTC-USD"
+
+	// Run backtest
+	metrics, err := engine.Run(strategyConfig)
+	testutils.AssertNoError(t, err, "Backtest should run without error")
+	testutils.AssertNotNil(t, metrics, "Metrics should be generated")
+
+	// Verify basic metrics
+	testutils.AssertTrue(t, metrics.TotalTrades >= 0, "Should have valid trade count")
+	testutils.AssertTrue(t, len(metrics.EquityCurve) > 0, "Should have equity curve")
+	testutils.AssertTrue(t, len(metrics.Trades) == metrics.TotalTrades, "Trades count should match")
+
+	// Verify equity curve starts with initial capital
+	if len(metrics.EquityCurve) > 0 {
+		testutils.AssertTrue(t, metrics.EquityCurve[0].Equity.Equal(config.InitialCapital),
+			"Equity curve should start with initial capital")
+	}
+
+	// Verify final equity is reasonable (not negative, not excessively high)
+	testutils.AssertTrue(t, metrics.EquityCurve[len(metrics.EquityCurve)-1].Equity.GreaterThanOrEqual(decimal.Zero),
+		"Final equity should not be negative")
+	testutils.AssertTrue(t, metrics.EquityCurve[len(metrics.EquityCurve)-1].Equity.LessThan(decimal.NewFromFloat(1000000)),
+		"Final equity should be reasonable")
+}

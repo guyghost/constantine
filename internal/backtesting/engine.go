@@ -129,9 +129,9 @@ func (e *Engine) feedCandleToStrategy(ctx context.Context, candle exchanges.Cand
 	// Extract prices and volumes
 	prices := make([]decimal.Decimal, len(candles))
 	volumes := make([]decimal.Decimal, len(candles))
-	for i, c := range candles {
-		prices[i] = c.Close
-		volumes[i] = c.Volume
+	for i := range candles {
+		prices[i] = candles[i].Close
+		volumes[i] = candles[i].Volume
 	}
 
 	// Generate signal from candles

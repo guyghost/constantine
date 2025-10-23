@@ -11,31 +11,22 @@ import (
 )
 
 var (
-	// Color scheme
-	primaryColor   = lipgloss.Color("#00D9FF")
-	secondaryColor = lipgloss.Color("#7D56F4")
-	successColor   = lipgloss.Color("#00FF87")
-	errorColor     = lipgloss.Color("#FF5555")
-	warningColor   = lipgloss.Color("#FFB86C")
-	mutedColor     = lipgloss.Color("#6272A4")
-
-	// Styles
-	titleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(primaryColor).
-			Padding(0, 1)
-
-	headerStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(secondaryColor).
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(secondaryColor).
-			Padding(0, 1)
+	successColor = lipgloss.Color("#00FF87")
+	errorColor   = lipgloss.Color("#FF5555")
+	mutedColor   = lipgloss.Color("#6272A4")
 
 	boxStyle = lipgloss.NewStyle().
 			BorderStyle(lipgloss.RoundedBorder()).
 			BorderForeground(mutedColor).
 			Padding(1, 2)
+
+	headerStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFFDF5")).
+			Bold(true)
+
+	titleStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFFDF5")).
+			Bold(true)
 
 	successStyle = lipgloss.NewStyle().
 			Foreground(successColor).
@@ -45,15 +36,12 @@ var (
 			Foreground(errorColor).
 			Bold(true)
 
-	warningStyle = lipgloss.NewStyle().
-			Foreground(warningColor)
-
 	mutedStyle = lipgloss.NewStyle().
 			Foreground(mutedColor)
 
 	statusBarStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFFDF5")).
-			Background(secondaryColor).
+			Background(lipgloss.Color("#6272A4")).
 			Padding(0, 1)
 
 	helpStyle = lipgloss.NewStyle().
