@@ -2,7 +2,9 @@ package coinbase
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -15,6 +17,55 @@ const (
 	coinbaseWSURL  = "wss://advanced-trade-ws.coinbase.com"
 )
 
+// HTTPClient handles REST API requests to Coinbase
+type HTTPClient struct {
+	baseURL    string
+	apiKey     string
+	apiSecret  string
+	httpClient *http.Client
+}
+
+// NewHTTPClient creates a new HTTP client for Coinbase
+func NewHTTPClient(baseURL, apiKey, apiSecret string) *HTTPClient {
+	return &HTTPClient{
+		baseURL:   baseURL,
+		apiKey:    apiKey,
+		apiSecret: apiSecret,
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+	}
+}
+
+// doRequest performs an HTTP request
+func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body interface{}, result interface{}) error {
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Set headers
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("API error: status=%d", resp.StatusCode)
+	}
+
+	if result != nil {
+		if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+			return fmt.Errorf("failed to decode response: %w", err)
+		}
+	}
+
+	return nil
+}
+
 // Client implements the exchanges.Exchange interface for Coinbase
 type Client struct {
 	apiKey     string
@@ -24,17 +75,19 @@ type Client struct {
 	connected  bool
 	ws         *WebSocketClient
 	mu         sync.RWMutex
-	httpClient interface{} // Placeholder for HTTP client
+	httpClient *HTTPClient
 }
 
 // NewClient creates a new Coinbase client
 func NewClient(apiKey, apiSecret string) *Client {
-	return &Client{
+	c := &Client{
 		apiKey:    apiKey,
 		apiSecret: apiSecret,
 		baseURL:   coinbaseAPIURL,
 		wsURL:     coinbaseWSURL,
 	}
+	c.httpClient = NewHTTPClient(c.baseURL, apiKey, apiSecret)
+	return c
 }
 
 // Name returns the exchange name
@@ -87,7 +140,7 @@ func (c *Client) IsConnected() bool {
 
 // GetTicker retrieves ticker data
 func (c *Client) GetTicker(ctx context.Context, symbol string) (*exchanges.Ticker, error) {
-	// TODO: Implement REST API call
+	// For now, return mock data - TODO: implement actual API call
 	return &exchanges.Ticker{
 		Symbol:    symbol,
 		Bid:       decimal.NewFromFloat(50000),

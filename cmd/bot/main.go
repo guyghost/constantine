@@ -12,6 +12,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/guyghost/constantine/internal/exchanges"
+	"github.com/guyghost/constantine/internal/exchanges/coinbase"
 	"github.com/guyghost/constantine/internal/exchanges/dydx"
 	"github.com/guyghost/constantine/internal/exchanges/hyperliquid"
 	"github.com/guyghost/constantine/internal/order"
@@ -140,8 +141,8 @@ func initializeBot(ctx context.Context) (
 		exchange = hyperliquid.NewClient(apiKey, apiSecret)
 	case "dydx":
 		exchange = dydx.NewClient(apiKey, apiSecret)
-	// case "coinbase":
-	// 	exchange = coinbase.NewClient(apiKey, apiSecret)
+	case "coinbase":
+		exchange = coinbase.NewClient(apiKey, apiSecret)
 	default:
 		exchange = hyperliquid.NewClient(apiKey, apiSecret)
 	}

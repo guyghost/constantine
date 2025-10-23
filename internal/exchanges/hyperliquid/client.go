@@ -3,6 +3,7 @@ package hyperliquid
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -15,6 +16,26 @@ const (
 	hyperliquidWSURL  = "wss://api.hyperliquid.xyz/ws"
 )
 
+// HTTPClient handles REST API requests to Hyperliquid
+type HTTPClient struct {
+	baseURL    string
+	apiKey     string
+	apiSecret  string
+	httpClient *http.Client
+}
+
+// NewHTTPClient creates a new HTTP client for Hyperliquid
+func NewHTTPClient(baseURL, apiKey, apiSecret string) *HTTPClient {
+	return &HTTPClient{
+		baseURL:   baseURL,
+		apiKey:    apiKey,
+		apiSecret: apiSecret,
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+	}
+}
+
 // Client implements the exchanges.Exchange interface for Hyperliquid
 type Client struct {
 	apiKey     string
@@ -24,17 +45,19 @@ type Client struct {
 	connected  bool
 	ws         *WebSocketClient
 	mu         sync.RWMutex
-	httpClient interface{} // Placeholder for HTTP client
+	httpClient *HTTPClient
 }
 
 // NewClient creates a new Hyperliquid client
 func NewClient(apiKey, apiSecret string) *Client {
-	return &Client{
+	c := &Client{
 		apiKey:    apiKey,
 		apiSecret: apiSecret,
 		baseURL:   hyperliquidAPIURL,
 		wsURL:     hyperliquidWSURL,
 	}
+	c.httpClient = NewHTTPClient(c.baseURL, apiKey, apiSecret)
+	return c
 }
 
 // Name returns the exchange name
@@ -87,7 +110,8 @@ func (c *Client) IsConnected() bool {
 
 // GetTicker retrieves ticker data
 func (c *Client) GetTicker(ctx context.Context, symbol string) (*exchanges.Ticker, error) {
-	// TODO: Implement REST API call
+	// TODO: Implement REST API call to Hyperliquid
+	// Currently returning mock data
 	return &exchanges.Ticker{
 		Symbol:    symbol,
 		Bid:       decimal.NewFromFloat(50000),
