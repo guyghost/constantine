@@ -9,6 +9,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/guyghost/constantine/internal/exchanges"
+	"github.com/shopspring/decimal"
 )
 
 // WebSocketClient handles WebSocket connections for Coinbase
@@ -92,7 +93,7 @@ func (ws *WebSocketClient) handleMessages() {
 
 // processMessage processes a single message
 func (ws *WebSocketClient) processMessage(message []byte) {
-	var msg map[string]interface{}
+	var msg map[string]any
 	if err := json.Unmarshal(message, &msg); err != nil {
 		return
 	}
@@ -114,8 +115,7 @@ func (ws *WebSocketClient) processMessage(message []byte) {
 }
 
 // handleTickerMessage handles ticker updates
-func (ws *WebSocketClient) handleTickerMessage(msg map[string]interface{}) {
-	// TODO: Parse ticker data according to Coinbase format
+func (ws *WebSocketClient) handleTickerMessage(msg map[string]any) {
 	ws.mu.RLock()
 	defer ws.mu.RUnlock()
 
@@ -124,15 +124,40 @@ func (ws *WebSocketClient) handleTickerMessage(msg map[string]interface{}) {
 		return
 	}
 
-	event := events[0].(map[string]interface{})
+	event, ok := events[0].(map[string]interface{})
+	if !ok {
+		return
+	}
+
 	symbol, ok := event["product_id"].(string)
 	if !ok {
 		return
 	}
 
 	if callback, exists := ws.tickerCallbacks[symbol]; exists {
+		// Parse ticker data
+		var bid, ask, last decimal.Decimal
+		var volume24h decimal.Decimal
+
+		if bestBid, ok := event["best_bid"].(string); ok {
+			bid, _ = decimal.NewFromString(bestBid)
+		}
+		if bestAsk, ok := event["best_ask"].(string); ok {
+			ask, _ = decimal.NewFromString(bestAsk)
+		}
+		if price, ok := event["price"].(string); ok {
+			last, _ = decimal.NewFromString(price)
+		}
+		if size, ok := event["size"].(string); ok {
+			volume24h, _ = decimal.NewFromString(size)
+		}
+
 		ticker := &exchanges.Ticker{
 			Symbol:    symbol,
+			Bid:       bid,
+			Ask:       ask,
+			Last:      last,
+			Volume24h: volume24h,
 			Timestamp: time.Now(),
 		}
 		callback(ticker)
@@ -140,8 +165,7 @@ func (ws *WebSocketClient) handleTickerMessage(msg map[string]interface{}) {
 }
 
 // handleOrderBookMessage handles order book updates
-func (ws *WebSocketClient) handleOrderBookMessage(msg map[string]interface{}) {
-	// TODO: Parse order book data according to Coinbase format
+func (ws *WebSocketClient) handleOrderBookMessage(msg map[string]any) {
 	ws.mu.RLock()
 	defer ws.mu.RUnlock()
 
@@ -150,17 +174,52 @@ func (ws *WebSocketClient) handleOrderBookMessage(msg map[string]interface{}) {
 		return
 	}
 
-	event := events[0].(map[string]interface{})
+	event, ok := events[0].(map[string]interface{})
+	if !ok {
+		return
+	}
+
 	symbol, ok := event["product_id"].(string)
 	if !ok {
 		return
 	}
 
 	if callback, exists := ws.orderbookCallbacks[symbol]; exists {
+		// Parse order book data
+		var bids, asks []exchanges.Level
+
+		if bidsData, ok := event["bids"].([]interface{}); ok {
+			for _, bid := range bidsData {
+				if bidSlice, ok := bid.([]interface{}); ok && len(bidSlice) >= 2 {
+					if priceStr, ok := bidSlice[0].(string); ok {
+						if sizeStr, ok := bidSlice[1].(string); ok {
+							price, _ := decimal.NewFromString(priceStr)
+							size, _ := decimal.NewFromString(sizeStr)
+							bids = append(bids, exchanges.Level{Price: price, Amount: size})
+						}
+					}
+				}
+			}
+		}
+
+		if asksData, ok := event["asks"].([]interface{}); ok {
+			for _, ask := range asksData {
+				if askSlice, ok := ask.([]interface{}); ok && len(askSlice) >= 2 {
+					if priceStr, ok := askSlice[0].(string); ok {
+						if sizeStr, ok := askSlice[1].(string); ok {
+							price, _ := decimal.NewFromString(priceStr)
+							size, _ := decimal.NewFromString(sizeStr)
+							asks = append(asks, exchanges.Level{Price: price, Amount: size})
+						}
+					}
+				}
+			}
+		}
+
 		orderbook := &exchanges.OrderBook{
 			Symbol:    symbol,
-			Bids:      []exchanges.Level{},
-			Asks:      []exchanges.Level{},
+			Bids:      bids,
+			Asks:      asks,
 			Timestamp: time.Now(),
 		}
 		callback(orderbook)
@@ -168,8 +227,7 @@ func (ws *WebSocketClient) handleOrderBookMessage(msg map[string]interface{}) {
 }
 
 // handleTradeMessage handles trade updates
-func (ws *WebSocketClient) handleTradeMessage(msg map[string]interface{}) {
-	// TODO: Parse trade data according to Coinbase format
+func (ws *WebSocketClient) handleTradeMessage(msg map[string]any) {
 	ws.mu.RLock()
 	defer ws.mu.RUnlock()
 
@@ -178,15 +236,40 @@ func (ws *WebSocketClient) handleTradeMessage(msg map[string]interface{}) {
 		return
 	}
 
-	event := events[0].(map[string]interface{})
+	event, ok := events[0].(map[string]interface{})
+	if !ok {
+		return
+	}
+
 	symbol, ok := event["product_id"].(string)
 	if !ok {
 		return
 	}
 
 	if callback, exists := ws.tradeCallbacks[symbol]; exists {
+		// Parse trade data
+		var price, size decimal.Decimal
+		var side exchanges.OrderSide
+
+		if priceStr, ok := event["price"].(string); ok {
+			price, _ = decimal.NewFromString(priceStr)
+		}
+		if sizeStr, ok := event["size"].(string); ok {
+			size, _ = decimal.NewFromString(sizeStr)
+		}
+		if sideStr, ok := event["side"].(string); ok {
+			if sideStr == "buy" {
+				side = exchanges.OrderSideBuy
+			} else {
+				side = exchanges.OrderSideSell
+			}
+		}
+
 		trade := &exchanges.Trade{
 			Symbol:    symbol,
+			Side:      side,
+			Price:     price,
+			Amount:    size,
 			Timestamp: time.Now(),
 		}
 		callback(trade)
@@ -242,7 +325,7 @@ func (ws *WebSocketClient) SubscribeTrades(ctx context.Context, symbol string, c
 }
 
 // sendMessage sends a message through the WebSocket
-func (ws *WebSocketClient) sendMessage(msg interface{}) error {
+func (ws *WebSocketClient) sendMessage(msg any) error {
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
 

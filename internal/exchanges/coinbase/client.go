@@ -38,7 +38,7 @@ func NewHTTPClient(baseURL, apiKey, apiSecret string) *HTTPClient {
 }
 
 // doRequest performs an HTTP request
-func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body any, result any) error {
+func (c *HTTPClient) doRequest(ctx context.Context, method, path string, _ any, result any) error {
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
@@ -179,27 +179,165 @@ func (c *Client) GetTicker(ctx context.Context, symbol string) (*exchanges.Ticke
 	}, nil
 }
 
+// CoinbaseOrderBookResponse represents the response from Coinbase order book API
+type CoinbaseOrderBookResponse struct {
+	PriceBook struct {
+		ProductID string     `json:"product_id"`
+		Bids      [][]string `json:"bids"` // [[price, size], ...]
+		Asks      [][]string `json:"asks"` // [[price, size], ...]
+		Time      string     `json:"time"`
+	} `json:"pricebook"`
+}
+
 // GetOrderBook retrieves order book data
 func (c *Client) GetOrderBook(ctx context.Context, symbol string, depth int) (*exchanges.OrderBook, error) {
-	// TODO: Implement REST API call
+	var response CoinbaseOrderBookResponse
+	path := fmt.Sprintf("/brokerage/product_book?product_id=%s", symbol)
+	err := c.httpClient.doRequest(ctx, "GET", path, nil, &response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get order book: %w", err)
+	}
+
+	// Parse bids
+	bids := make([]exchanges.Level, 0, len(response.PriceBook.Bids))
+	for i, bid := range response.PriceBook.Bids {
+		if i >= depth {
+			break
+		}
+		if len(bid) >= 2 {
+			price, err := decimal.NewFromString(bid[0])
+			if err != nil {
+				continue
+			}
+			size, err := decimal.NewFromString(bid[1])
+			if err != nil {
+				continue
+			}
+			bids = append(bids, exchanges.Level{
+				Price:  price,
+				Amount: size,
+			})
+		}
+	}
+
+	// Parse asks
+	asks := make([]exchanges.Level, 0, len(response.PriceBook.Asks))
+	for i, ask := range response.PriceBook.Asks {
+		if i >= depth {
+			break
+		}
+		if len(ask) >= 2 {
+			price, err := decimal.NewFromString(ask[0])
+			if err != nil {
+				continue
+			}
+			size, err := decimal.NewFromString(ask[1])
+			if err != nil {
+				continue
+			}
+			asks = append(asks, exchanges.Level{
+				Price:  price,
+				Amount: size,
+			})
+		}
+	}
+
 	return &exchanges.OrderBook{
-		Symbol: symbol,
-		Bids: []exchanges.Level{
-			{Price: decimal.NewFromFloat(50000), Amount: decimal.NewFromFloat(1.5)},
-			{Price: decimal.NewFromFloat(49999), Amount: decimal.NewFromFloat(2.0)},
-		},
-		Asks: []exchanges.Level{
-			{Price: decimal.NewFromFloat(50001), Amount: decimal.NewFromFloat(1.5)},
-			{Price: decimal.NewFromFloat(50002), Amount: decimal.NewFromFloat(2.0)},
-		},
+		Symbol:    symbol,
+		Bids:      bids,
+		Asks:      asks,
 		Timestamp: time.Now(),
 	}, nil
 }
 
+// CoinbaseCandlesResponse represents the response from Coinbase candles API
+type CoinbaseCandlesResponse struct {
+	Candles []struct {
+		Start  string `json:"start"`
+		Low    string `json:"low"`
+		High   string `json:"high"`
+		Open   string `json:"open"`
+		Close  string `json:"close"`
+		Volume string `json:"volume"`
+	} `json:"candles"`
+}
+
+// intervalToGranularity converts interval string to Coinbase granularity
+func intervalToGranularity(interval string) string {
+	switch interval {
+	case "1m":
+		return "60"
+	case "5m":
+		return "300"
+	case "15m":
+		return "900"
+	case "1h":
+		return "3600"
+	case "6h":
+		return "21600"
+	case "1d":
+		return "86400"
+	default:
+		return "3600" // default to 1 hour
+	}
+}
+
 // GetCandles retrieves OHLCV data
 func (c *Client) GetCandles(ctx context.Context, symbol string, interval string, limit int) ([]exchanges.Candle, error) {
-	// TODO: Implement REST API call
-	return []exchanges.Candle{}, nil
+	granularity := intervalToGranularity(interval)
+	path := fmt.Sprintf("/brokerage/products/%s/candles?granularity=%s&limit=%d", symbol, granularity, limit)
+
+	var response CoinbaseCandlesResponse
+	err := c.httpClient.doRequest(ctx, "GET", path, nil, &response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get candles: %w", err)
+	}
+
+	candles := make([]exchanges.Candle, 0, len(response.Candles))
+	for _, c := range response.Candles {
+		timestamp, err := time.Parse(time.RFC3339, c.Start)
+		if err != nil {
+			continue
+		}
+
+		open, err := decimal.NewFromString(c.Open)
+		if err != nil {
+			continue
+		}
+		high, err := decimal.NewFromString(c.High)
+		if err != nil {
+			continue
+		}
+		low, err := decimal.NewFromString(c.Low)
+		if err != nil {
+			continue
+		}
+		close, err := decimal.NewFromString(c.Close)
+		if err != nil {
+			continue
+		}
+		volume, err := decimal.NewFromString(c.Volume)
+		if err != nil {
+			continue
+		}
+
+		candles = append(candles, exchanges.Candle{
+			Symbol:    symbol,
+			Timestamp: timestamp,
+			Open:      open,
+			High:      high,
+			Low:       low,
+			Close:     close,
+			Volume:    volume,
+		})
+	}
+
+	// Reverse to get chronological order (Coinbase returns newest first)
+	for i, j := 0, len(candles)-1; i < j; i, j = i+1, j-1 {
+		candles[i], candles[j] = candles[j], candles[i]
+	}
+
+	return candles, nil
 }
 
 // SubscribeTicker subscribes to ticker updates
@@ -226,13 +364,28 @@ func (c *Client) SubscribeTrades(ctx context.Context, symbol string, callback fu
 	return c.ws.SubscribeTrades(ctx, symbol, callback)
 }
 
+// CoinbaseOrderRequest represents the request body for placing orders
+type CoinbaseOrderRequest struct {
+	ClientOrderID string `json:"client_order_id"`
+	ProductID     string `json:"product_id"`
+	Side          string `json:"side"`
+	OrderConfig   struct {
+		LimitLimitGTC struct {
+			BaseSize   string `json:"base_size"`
+			LimitPrice string `json:"limit_price"`
+		} `json:"limit_limit_gtc"`
+	} `json:"order_configuration"`
+}
+
 // PlaceOrder places a new order
 func (c *Client) PlaceOrder(ctx context.Context, order *exchanges.Order) (*exchanges.Order, error) {
-	// TODO: Implement REST API call
-	order.ID = fmt.Sprintf("CB-%d", time.Now().Unix())
+	// TODO: Implement authentication and real API call
+	// For now, simulate order placement
+	order.ID = fmt.Sprintf("CB-%d", time.Now().UnixNano())
 	order.Status = exchanges.OrderStatusOpen
 	order.CreatedAt = time.Now()
 	order.UpdatedAt = time.Now()
+
 	return order, nil
 }
 
@@ -250,8 +403,21 @@ func (c *Client) GetOrder(ctx context.Context, orderID string) (*exchanges.Order
 
 // GetOpenOrders retrieves all open orders
 func (c *Client) GetOpenOrders(ctx context.Context, symbol string) ([]exchanges.Order, error) {
-	// TODO: Implement REST API call
-	return []exchanges.Order{}, nil
+	// TODO: Implement real API call
+	// Mock open orders
+	return []exchanges.Order{
+		{
+			ID:        "cb-order-1",
+			Symbol:    symbol,
+			Side:      exchanges.OrderSideBuy,
+			Type:      exchanges.OrderTypeLimit,
+			Price:     decimal.NewFromFloat(49000),
+			Amount:    decimal.NewFromFloat(0.01),
+			Status:    exchanges.OrderStatusOpen,
+			CreatedAt: time.Now().Add(-time.Hour),
+			UpdatedAt: time.Now(),
+		},
+	}, nil
 }
 
 // GetOrderHistory retrieves order history
@@ -260,9 +426,21 @@ func (c *Client) GetOrderHistory(ctx context.Context, symbol string, limit int) 
 	return []exchanges.Order{}, nil
 }
 
+// CoinbaseAccountsResponse represents the response from Coinbase accounts API
+type CoinbaseAccountsResponse struct {
+	Accounts []struct {
+		UUID      string `json:"uuid"`
+		Name      string `json:"name"`
+		Currency  string `json:"currency"`
+		Available string `json:"available_balance"`
+		Hold      string `json:"hold"`
+	} `json:"accounts"`
+}
+
 // GetBalance retrieves account balance
 func (c *Client) GetBalance(ctx context.Context) ([]exchanges.Balance, error) {
-	// TODO: Implement REST API call
+	// TODO: Implement authentication and real API call
+	// For now, return mock data
 	return []exchanges.Balance{
 		{
 			Asset:     "USD",
@@ -271,13 +449,42 @@ func (c *Client) GetBalance(ctx context.Context) ([]exchanges.Balance, error) {
 			Total:     decimal.NewFromFloat(11000),
 			UpdatedAt: time.Now(),
 		},
+		{
+			Asset:     "BTC",
+			Free:      decimal.NewFromFloat(0.5),
+			Locked:    decimal.NewFromFloat(0.1),
+			Total:     decimal.NewFromFloat(0.6),
+			UpdatedAt: time.Now(),
+		},
 	}, nil
 }
 
 // GetPositions retrieves all open positions
 func (c *Client) GetPositions(ctx context.Context) ([]exchanges.Position, error) {
-	// TODO: Implement REST API call
-	return []exchanges.Position{}, nil
+	// For Coinbase spot trading, positions are just non-zero balances
+	balances, err := c.GetBalance(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	positions := make([]exchanges.Position, 0)
+	for _, balance := range balances {
+		if balance.Total.GreaterThan(decimal.Zero) && balance.Asset != "USD" {
+			// Mock position data - in reality would need market price
+			positions = append(positions, exchanges.Position{
+				Symbol:        balance.Asset + "-USD",
+				Side:          exchanges.OrderSideBuy, // Assume long positions
+				Size:          balance.Total,
+				EntryPrice:    decimal.NewFromFloat(50000), // Mock price
+				MarkPrice:     decimal.NewFromFloat(50000), // Mock price
+				Leverage:      decimal.NewFromInt(1),
+				UnrealizedPnL: decimal.Zero,
+				RealizedPnL:   decimal.Zero,
+			})
+		}
+	}
+
+	return positions, nil
 }
 
 // GetPosition retrieves a specific position
