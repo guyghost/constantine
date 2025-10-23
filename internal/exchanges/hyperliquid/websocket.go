@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/guyghost/constantine/internal/exchanges"
+	"github.com/shopspring/decimal"
 )
 
 // WebSocketClient handles WebSocket connections for Hyperliquid
@@ -92,41 +94,75 @@ func (ws *WebSocketClient) handleMessages() {
 
 // processMessage processes a single message
 func (ws *WebSocketClient) processMessage(message []byte) {
-	var msg map[string]interface{}
+	var msg map[string]any
 	if err := json.Unmarshal(message, &msg); err != nil {
 		return
 	}
 
-	// TODO: Implement proper message routing based on Hyperliquid's protocol
-	channel, ok := msg["channel"].(string)
-	if !ok {
-		return
-	}
-
-	switch channel {
-	case "ticker":
-		ws.handleTickerMessage(msg)
-	case "orderbook":
-		ws.handleOrderBookMessage(msg)
-	case "trades":
-		ws.handleTradeMessage(msg)
+	// Hyperliquid WebSocket messages have different formats
+	// Check if it's a subscription response or data update
+	if channel, ok := msg["channel"].(string); ok {
+		switch channel {
+		case "ticker":
+			ws.handleTickerMessage(msg)
+		case "orderbook":
+			ws.handleOrderBookMessage(msg)
+		case "trades":
+			ws.handleTradeMessage(msg)
+		}
 	}
 }
 
 // handleTickerMessage handles ticker updates
-func (ws *WebSocketClient) handleTickerMessage(msg map[string]interface{}) {
-	// TODO: Parse ticker data according to Hyperliquid format
+func (ws *WebSocketClient) handleTickerMessage(msg map[string]any) {
 	ws.mu.RLock()
 	defer ws.mu.RUnlock()
 
-	symbol, ok := msg["symbol"].(string)
+	data, ok := msg["data"].(map[string]any)
+	if !ok {
+		return
+	}
+
+	symbol, ok := data["coin"].(string)
 	if !ok {
 		return
 	}
 
 	if callback, exists := ws.tickerCallbacks[symbol]; exists {
+		// Parse ticker data
+		var bid, ask, last decimal.Decimal
+		var volume24h decimal.Decimal
+
+		if bids, ok := data["bids"].([]any); ok && len(bids) > 0 {
+			if bidData, ok := bids[0].([]any); ok && len(bidData) >= 2 {
+				if priceStr, ok := bidData[0].(string); ok {
+					bid, _ = decimal.NewFromString(priceStr)
+				}
+			}
+		}
+
+		if asks, ok := data["asks"].([]any); ok && len(asks) > 0 {
+			if askData, ok := asks[0].([]any); ok && len(askData) >= 2 {
+				if priceStr, ok := askData[0].(string); ok {
+					ask, _ = decimal.NewFromString(priceStr)
+				}
+			}
+		}
+
+		if lastStr, ok := data["last"].(string); ok {
+			last, _ = decimal.NewFromString(lastStr)
+		}
+
+		if volStr, ok := data["volume"].(string); ok {
+			volume24h, _ = decimal.NewFromString(volStr)
+		}
+
 		ticker := &exchanges.Ticker{
-			Symbol:    symbol,
+			Symbol:    symbol + "-USD", // Add USD suffix
+			Bid:       bid,
+			Ask:       ask,
+			Last:      last,
+			Volume24h: volume24h,
 			Timestamp: time.Now(),
 		}
 		callback(ticker)
@@ -134,21 +170,56 @@ func (ws *WebSocketClient) handleTickerMessage(msg map[string]interface{}) {
 }
 
 // handleOrderBookMessage handles order book updates
-func (ws *WebSocketClient) handleOrderBookMessage(msg map[string]interface{}) {
-	// TODO: Parse order book data according to Hyperliquid format
+func (ws *WebSocketClient) handleOrderBookMessage(msg map[string]any) {
 	ws.mu.RLock()
 	defer ws.mu.RUnlock()
 
-	symbol, ok := msg["symbol"].(string)
+	data, ok := msg["data"].(map[string]any)
+	if !ok {
+		return
+	}
+
+	symbol, ok := data["coin"].(string)
 	if !ok {
 		return
 	}
 
 	if callback, exists := ws.orderbookCallbacks[symbol]; exists {
+		// Parse order book data
+		var bids, asks []exchanges.Level
+
+		if bidsData, ok := data["bids"].([]any); ok {
+			for _, bid := range bidsData {
+				if bidSlice, ok := bid.([]any); ok && len(bidSlice) >= 2 {
+					if priceStr, ok := bidSlice[0].(string); ok {
+						if sizeStr, ok := bidSlice[1].(string); ok {
+							price, _ := decimal.NewFromString(priceStr)
+							size, _ := decimal.NewFromString(sizeStr)
+							bids = append(bids, exchanges.Level{Price: price, Amount: size})
+						}
+					}
+				}
+			}
+		}
+
+		if asksData, ok := data["asks"].([]any); ok {
+			for _, ask := range asksData {
+				if askSlice, ok := ask.([]any); ok && len(askSlice) >= 2 {
+					if priceStr, ok := askSlice[0].(string); ok {
+						if sizeStr, ok := askSlice[1].(string); ok {
+							price, _ := decimal.NewFromString(priceStr)
+							size, _ := decimal.NewFromString(sizeStr)
+							asks = append(asks, exchanges.Level{Price: price, Amount: size})
+						}
+					}
+				}
+			}
+		}
+
 		orderbook := &exchanges.OrderBook{
-			Symbol:    symbol,
-			Bids:      []exchanges.Level{},
-			Asks:      []exchanges.Level{},
+			Symbol:    symbol + "-USD",
+			Bids:      bids,
+			Asks:      asks,
 			Timestamp: time.Now(),
 		}
 		callback(orderbook)
@@ -156,19 +227,44 @@ func (ws *WebSocketClient) handleOrderBookMessage(msg map[string]interface{}) {
 }
 
 // handleTradeMessage handles trade updates
-func (ws *WebSocketClient) handleTradeMessage(msg map[string]interface{}) {
-	// TODO: Parse trade data according to Hyperliquid format
+func (ws *WebSocketClient) handleTradeMessage(msg map[string]any) {
 	ws.mu.RLock()
 	defer ws.mu.RUnlock()
 
-	symbol, ok := msg["symbol"].(string)
+	data, ok := msg["data"].(map[string]any)
+	if !ok {
+		return
+	}
+
+	symbol, ok := data["coin"].(string)
 	if !ok {
 		return
 	}
 
 	if callback, exists := ws.tradeCallbacks[symbol]; exists {
+		// Parse trade data
+		var price, size decimal.Decimal
+		var side exchanges.OrderSide
+
+		if priceStr, ok := data["px"].(string); ok {
+			price, _ = decimal.NewFromString(priceStr)
+		}
+		if sizeStr, ok := data["sz"].(string); ok {
+			size, _ = decimal.NewFromString(sizeStr)
+		}
+		if sideStr, ok := data["side"].(string); ok {
+			if sideStr == "B" {
+				side = exchanges.OrderSideBuy
+			} else {
+				side = exchanges.OrderSideSell
+			}
+		}
+
 		trade := &exchanges.Trade{
-			Symbol:    symbol,
+			Symbol:    symbol + "-USD",
+			Side:      side,
+			Price:     price,
+			Amount:    size,
 			Timestamp: time.Now(),
 		}
 		callback(trade)
@@ -178,13 +274,14 @@ func (ws *WebSocketClient) handleTradeMessage(msg map[string]interface{}) {
 // SubscribeTicker subscribes to ticker updates
 func (ws *WebSocketClient) SubscribeTicker(ctx context.Context, symbol string, callback func(*exchanges.Ticker)) error {
 	ws.mu.Lock()
-	ws.tickerCallbacks[symbol] = callback
+	coin := strings.Split(symbol, "-")[0] // Extract coin from symbol
+	ws.tickerCallbacks[coin] = callback
 	ws.mu.Unlock()
 
 	// Send subscription message
-	sub := map[string]interface{}{
+	sub := map[string]any{
 		"method": "subscribe",
-		"params": []string{fmt.Sprintf("ticker.%s", symbol)},
+		"params": []string{fmt.Sprintf("ticker.%s", coin)},
 	}
 
 	return ws.sendMessage(sub)
@@ -193,13 +290,14 @@ func (ws *WebSocketClient) SubscribeTicker(ctx context.Context, symbol string, c
 // SubscribeOrderBook subscribes to order book updates
 func (ws *WebSocketClient) SubscribeOrderBook(ctx context.Context, symbol string, callback func(*exchanges.OrderBook)) error {
 	ws.mu.Lock()
-	ws.orderbookCallbacks[symbol] = callback
+	coin := strings.Split(symbol, "-")[0]
+	ws.orderbookCallbacks[coin] = callback
 	ws.mu.Unlock()
 
 	// Send subscription message
-	sub := map[string]interface{}{
+	sub := map[string]any{
 		"method": "subscribe",
-		"params": []string{fmt.Sprintf("orderbook.%s", symbol)},
+		"params": []string{fmt.Sprintf("orderbook.%s", coin)},
 	}
 
 	return ws.sendMessage(sub)
@@ -208,20 +306,21 @@ func (ws *WebSocketClient) SubscribeOrderBook(ctx context.Context, symbol string
 // SubscribeTrades subscribes to trade updates
 func (ws *WebSocketClient) SubscribeTrades(ctx context.Context, symbol string, callback func(*exchanges.Trade)) error {
 	ws.mu.Lock()
-	ws.tradeCallbacks[symbol] = callback
+	coin := strings.Split(symbol, "-")[0]
+	ws.tradeCallbacks[coin] = callback
 	ws.mu.Unlock()
 
 	// Send subscription message
-	sub := map[string]interface{}{
+	sub := map[string]any{
 		"method": "subscribe",
-		"params": []string{fmt.Sprintf("trades.%s", symbol)},
+		"params": []string{fmt.Sprintf("trades.%s", coin)},
 	}
 
 	return ws.sendMessage(sub)
 }
 
 // sendMessage sends a message through the WebSocket
-func (ws *WebSocketClient) sendMessage(msg interface{}) error {
+func (ws *WebSocketClient) sendMessage(msg any) error {
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
 
