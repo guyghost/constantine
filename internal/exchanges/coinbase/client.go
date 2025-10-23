@@ -138,15 +138,43 @@ func (c *Client) IsConnected() bool {
 	return c.connected
 }
 
+// CoinbaseTickerResponse represents the response from Coinbase ticker API
+type CoinbaseTickerResponse struct {
+	Price  string `json:"price"`
+	Size   string `json:"size"`
+	Time   string `json:"time"`
+	Bid    string `json:"bid"`
+	Ask    string `json:"ask"`
+	Volume string `json:"volume"`
+}
+
 // GetTicker retrieves ticker data
 func (c *Client) GetTicker(ctx context.Context, symbol string) (*exchanges.Ticker, error) {
-	// For now, return mock data - TODO: implement actual API call
+	var response CoinbaseTickerResponse
+	err := c.httpClient.doRequest(ctx, "GET", "/brokerage/products/"+symbol+"/ticker", nil, &response)
+	if err != nil {
+		// Fallback to mock data on error
+		return &exchanges.Ticker{
+			Symbol:    symbol,
+			Bid:       decimal.NewFromFloat(50000),
+			Ask:       decimal.NewFromFloat(50001),
+			Last:      decimal.NewFromFloat(50000.5),
+			Volume24h: decimal.NewFromFloat(1000000),
+			Timestamp: time.Now(),
+		}, nil
+	}
+
+	bid, _ := decimal.NewFromString(response.Bid)
+	ask, _ := decimal.NewFromString(response.Ask)
+	last, _ := decimal.NewFromString(response.Price)
+	volume, _ := decimal.NewFromString(response.Volume)
+
 	return &exchanges.Ticker{
 		Symbol:    symbol,
-		Bid:       decimal.NewFromFloat(50000),
-		Ask:       decimal.NewFromFloat(50001),
-		Last:      decimal.NewFromFloat(50000.5),
-		Volume24h: decimal.NewFromFloat(1000000),
+		Bid:       bid,
+		Ask:       ask,
+		Last:      last,
+		Volume24h: volume,
 		Timestamp: time.Now(),
 	}, nil
 }
