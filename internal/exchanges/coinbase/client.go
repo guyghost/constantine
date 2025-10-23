@@ -26,6 +26,7 @@ type HTTPClient struct {
 	baseURL       string
 	apiKey        string
 	privateKeyPEM string
+	portfolioID   string
 	httpClient    *http.Client
 }
 
@@ -59,7 +60,7 @@ func (c *HTTPClient) createJWT(method, path, host string) (string, error) {
 		return "", fmt.Errorf("failed to parse EC private key: %w", err)
 	}
 
-	// Create JWT claims
+	// Create JWT claims - using full URI as in official example
 	now := time.Now()
 	claims := jwt.MapClaims{
 		"sub": c.apiKey,
@@ -101,6 +102,9 @@ func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body an
 			return fmt.Errorf("failed to create JWT: %w", err)
 		}
 
+		// Debug logging
+		fmt.Printf("DEBUG Coinbase JWT: %s\n", jwt)
+
 		req.Header.Set("Authorization", "Bearer "+jwt)
 	}
 
@@ -128,6 +132,7 @@ type Client struct {
 	apiKey        string
 	apiSecret     string
 	privateKeyPEM string
+	portfolioID   string
 	baseURL       string
 	wsURL         string
 	connected     bool
@@ -138,9 +143,15 @@ type Client struct {
 
 // NewClient creates a new Coinbase client
 func NewClient(apiKey, privateKeyPEM string) *Client {
+	return NewClientWithPortfolio(apiKey, privateKeyPEM, "")
+}
+
+// NewClientWithPortfolio creates a new Coinbase client with portfolio ID
+func NewClientWithPortfolio(apiKey, privateKeyPEM, portfolioID string) *Client {
 	c := &Client{
 		apiKey:        apiKey,
 		privateKeyPEM: privateKeyPEM,
+		portfolioID:   portfolioID,
 		baseURL:       coinbaseAPIURL,
 		wsURL:         coinbaseWSURL,
 	}

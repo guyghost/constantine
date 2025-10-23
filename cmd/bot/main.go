@@ -189,10 +189,21 @@ func initializeBot() (
 
 	// Coinbase exchange
 	if exchangeConfigs["coinbase"].Enabled {
-		coinbaseExchange := coinbase.NewClient(
-			exchangeConfigs["coinbase"].APIKey,
-			exchangeConfigs["coinbase"].APISecret, // Now expects private key PEM
-		)
+		portfolioID := os.Getenv("COINBASE_PORTFOLIO_ID")
+		var coinbaseExchange *coinbase.Client
+
+		if portfolioID != "" {
+			coinbaseExchange = coinbase.NewClientWithPortfolio(
+				exchangeConfigs["coinbase"].APIKey,
+				exchangeConfigs["coinbase"].APISecret, // Now expects private key PEM
+				portfolioID,
+			)
+		} else {
+			coinbaseExchange = coinbase.NewClient(
+				exchangeConfigs["coinbase"].APIKey,
+				exchangeConfigs["coinbase"].APISecret, // Now expects private key PEM
+			)
+		}
 		exchangesMap["coinbase"] = coinbaseExchange
 		log.Printf("Coinbase exchange enabled")
 	}
