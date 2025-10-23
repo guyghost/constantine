@@ -2,15 +2,16 @@ package coinbase
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"net/http"
 	"sync"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"github.com/guyghost/constantine/internal/exchanges"
 	"github.com/shopspring/decimal"
 )
@@ -22,18 +23,18 @@ const (
 
 // HTTPClient handles REST API requests to Coinbase
 type HTTPClient struct {
-	baseURL    string
-	apiKey     string
-	apiSecret  string
-	httpClient *http.Client
+	baseURL       string
+	apiKey        string
+	privateKeyPEM string
+	httpClient    *http.Client
 }
 
 // NewHTTPClient creates a new HTTP client for Coinbase
-func NewHTTPClient(baseURL, apiKey, apiSecret string) *HTTPClient {
+func NewHTTPClient(baseURL, apiKey, privateKeyPEM string) *HTTPClient {
 	return &HTTPClient{
-		baseURL:   baseURL,
-		apiKey:    apiKey,
-		apiSecret: apiSecret,
+		baseURL:       baseURL,
+		apiKey:        apiKey,
+		privateKeyPEM: privateKeyPEM,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -41,67 +42,45 @@ func NewHTTPClient(baseURL, apiKey, apiSecret string) *HTTPClient {
 }
 
 // createJWT creates a JWT token for Coinbase API authentication
-func (c *HTTPClient) createJWT(method, path string, body string) (string, error) {
-	if c.apiKey == "" || c.apiSecret == "" {
-		return "", fmt.Errorf("API key and secret required for authentication")
+func (c *HTTPClient) createJWT(method, path, host string) (string, error) {
+	if c.apiKey == "" || c.privateKeyPEM == "" {
+		return "", fmt.Errorf("API key and private key PEM required for authentication")
 	}
 
-	// JWT Header
-	header := map[string]interface{}{
-		"alg": "HS256",
-		"typ": "JWT",
-		"kid": c.apiKey,
+	// Parse the private key
+	keyBytes := []byte(c.privateKeyPEM)
+	block, _ := pem.Decode(keyBytes)
+	if block == nil {
+		return "", fmt.Errorf("failed to parse PEM block containing the private key")
 	}
 
-	// JWT Payload
-	now := time.Now().UTC()
-	payload := map[string]interface{}{
+	privateKey, err := x509.ParseECPrivateKey(block.Bytes)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse EC private key: %w", err)
+	}
+
+	// Create JWT claims
+	now := time.Now()
+	claims := jwt.MapClaims{
+		"sub": c.apiKey,
 		"iss": "coinbase-cloud",
 		"nbf": now.Unix(),
 		"exp": now.Add(2 * time.Minute).Unix(),
-		"sub": c.apiKey,
-		"uri": fmt.Sprintf("%s%s", method, path),
+		"uri": fmt.Sprintf("%s %s%s", method, host, path),
 	}
 
-	if body != "" {
-		payload["body_hash"] = c.hashSHA256(body)
-	}
+	// Create token with ES256 signing method
+	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
+	token.Header["kid"] = c.apiKey
+	token.Header["nonce"] = uuid.New().String()
 
-	// Encode header
-	headerJSON, err := json.Marshal(header)
+	// Sign the token
+	signedToken, err := token.SignedString(privateKey)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal header: %w", err)
+		return "", fmt.Errorf("failed to sign token: %w", err)
 	}
-	headerB64 := base64.RawURLEncoding.EncodeToString(headerJSON)
 
-	// Encode payload
-	payloadJSON, err := json.Marshal(payload)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal payload: %w", err)
-	}
-	payloadB64 := base64.RawURLEncoding.EncodeToString(payloadJSON)
-
-	// Create signature
-	message := headerB64 + "." + payloadB64
-	signature := c.signHMAC(message, c.apiSecret)
-	signatureB64 := base64.RawURLEncoding.EncodeToString(signature)
-
-	// Create JWT
-	jwt := headerB64 + "." + payloadB64 + "." + signatureB64
-	return jwt, nil
-}
-
-// hashSHA256 creates a SHA256 hash of the input string
-func (c *HTTPClient) hashSHA256(data string) string {
-	hash := sha256.Sum256([]byte(data))
-	return base64.StdEncoding.EncodeToString(hash[:])
-}
-
-// signHMAC creates an HMAC-SHA256 signature
-func (c *HTTPClient) signHMAC(message, secret string) []byte {
-	h := hmac.New(sha256.New, []byte(secret))
-	h.Write([]byte(message))
-	return h.Sum(nil)
+	return signedToken, nil
 }
 
 // doRequest performs an HTTP request
@@ -116,17 +95,8 @@ func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body an
 	req.Header.Set("User-Agent", "Constantine-Trading-Bot/1.0")
 
 	// Add JWT authentication if API key is available
-	if c.apiKey != "" && c.apiSecret != "" {
-		var bodyStr string
-		if body != nil {
-			bodyBytes, err := json.Marshal(body)
-			if err != nil {
-				return fmt.Errorf("failed to marshal body: %w", err)
-			}
-			bodyStr = string(bodyBytes)
-		}
-
-		jwt, err := c.createJWT(method, path, bodyStr)
+	if c.apiKey != "" && c.privateKeyPEM != "" {
+		jwt, err := c.createJWT(method, path, req.Host)
 		if err != nil {
 			return fmt.Errorf("failed to create JWT: %w", err)
 		}
@@ -155,25 +125,26 @@ func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body an
 
 // Client implements the exchanges.Exchange interface for Coinbase
 type Client struct {
-	apiKey     string
-	apiSecret  string
-	baseURL    string
-	wsURL      string
-	connected  bool
-	ws         *WebSocketClient
-	mu         sync.RWMutex
-	httpClient *HTTPClient
+	apiKey        string
+	apiSecret     string
+	privateKeyPEM string
+	baseURL       string
+	wsURL         string
+	connected     bool
+	ws            *WebSocketClient
+	mu            sync.RWMutex
+	httpClient    *HTTPClient
 }
 
 // NewClient creates a new Coinbase client
-func NewClient(apiKey, apiSecret string) *Client {
+func NewClient(apiKey, privateKeyPEM string) *Client {
 	c := &Client{
-		apiKey:    apiKey,
-		apiSecret: apiSecret,
-		baseURL:   coinbaseAPIURL,
-		wsURL:     coinbaseWSURL,
+		apiKey:        apiKey,
+		privateKeyPEM: privateKeyPEM,
+		baseURL:       coinbaseAPIURL,
+		wsURL:         coinbaseWSURL,
 	}
-	c.httpClient = NewHTTPClient(c.baseURL, apiKey, apiSecret)
+	c.httpClient = NewHTTPClient(c.baseURL, apiKey, privateKeyPEM)
 	return c
 }
 

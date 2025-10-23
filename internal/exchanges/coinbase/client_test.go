@@ -9,7 +9,7 @@ import (
 )
 
 func TestNewClient(t *testing.T) {
-	client := NewClient("test_key", "test_secret")
+	client := NewClient("test_key", "test_private_key_pem")
 
 	if client == nil {
 		t.Fatal("NewClient returned nil")
@@ -23,8 +23,8 @@ func TestNewClient(t *testing.T) {
 		t.Errorf("Expected apiKey 'test_key', got %s", client.apiKey)
 	}
 
-	if client.apiSecret != "test_secret" {
-		t.Errorf("Expected apiSecret 'test_secret', got %s", client.apiSecret)
+	if client.privateKeyPEM != "test_private_key_pem" {
+		t.Errorf("Expected privateKeyPEM 'test_private_key_pem', got %s", client.privateKeyPEM)
 	}
 }
 

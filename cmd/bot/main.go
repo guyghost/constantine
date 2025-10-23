@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -32,6 +33,70 @@ const (
 var (
 	headless = flag.Bool("headless", false, "Run in headless mode without TUI")
 )
+
+// ExchangeConfig holds configuration for a single exchange
+type ExchangeConfig struct {
+	Name             string
+	Enabled          bool
+	APIKey           string
+	APISecret        string
+	WalletAddress    string
+	SubAccountNumber int
+}
+
+// loadExchangeConfigs loads exchange configurations from environment variables
+func loadExchangeConfigs() map[string]*ExchangeConfig {
+	configs := make(map[string]*ExchangeConfig)
+
+	// Hyperliquid
+	configs["hyperliquid"] = &ExchangeConfig{
+		Name:      "hyperliquid",
+		Enabled:   getEnvBool("ENABLE_HYPERLIQUID", true),
+		APIKey:    os.Getenv("HYPERLIQUID_API_KEY"),
+		APISecret: os.Getenv("HYPERLIQUID_API_SECRET"),
+	}
+
+	// Coinbase
+	configs["coinbase"] = &ExchangeConfig{
+		Name:      "coinbase",
+		Enabled:   getEnvBool("ENABLE_COINBASE", true),
+		APIKey:    os.Getenv("COINBASE_API_KEY"),
+		APISecret: os.Getenv("COINBASE_API_SECRET"),
+	}
+
+	// dYdX
+	configs["dydx"] = &ExchangeConfig{
+		Name:             "dydx",
+		Enabled:          getEnvBool("ENABLE_DYDX", false),
+		APIKey:           os.Getenv("DYDX_API_KEY"),
+		APISecret:        os.Getenv("DYDX_MNEMONIC"), // Use mnemonic as APISecret for dYdX
+		WalletAddress:    os.Getenv("DYDX_WALLET_ADDRESS"),
+		SubAccountNumber: getEnvInt("DYDX_SUBACCOUNT_NUMBER", 0),
+	}
+
+	return configs
+}
+
+// getEnvBool gets a boolean environment variable with default value
+func getEnvBool(key string, defaultValue bool) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	return value == "true" || value == "1" || value == "yes"
+}
+
+// getEnvInt gets an integer environment variable with default value
+func getEnvInt(key string, defaultValue int) int {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	if intValue, err := strconv.Atoi(value); err == nil {
+		return intValue
+	}
+	return defaultValue
+}
 
 func main() {
 	// Load .env file if it exists
@@ -106,48 +171,99 @@ func initializeBot() (
 	*risk.Manager,
 	error,
 ) {
-	// Get API credentials from environment or use defaults
-	apiKey := os.Getenv("EXCHANGE_API_KEY")
-	if apiKey == "" {
-		apiKey = defaultAPIKey
-	}
+	// Load exchange configurations
+	exchangeConfigs := loadExchangeConfigs()
 
-	apiSecret := os.Getenv("EXCHANGE_API_SECRET")
-	if apiSecret == "" {
-		apiSecret = defaultAPISecret
-	}
-
-	// Create all exchange clients
+	// Create all exchange clients based on configuration
 	exchangesMap := make(map[string]exchanges.Exchange)
 
 	// Hyperliquid exchange
-	hyperliquidExchange := hyperliquid.NewClient(apiKey, apiSecret)
-	exchangesMap["hyperliquid"] = hyperliquidExchange
+	if exchangeConfigs["hyperliquid"].Enabled {
+		hyperliquidExchange := hyperliquid.NewClient(
+			exchangeConfigs["hyperliquid"].APIKey,
+			exchangeConfigs["hyperliquid"].APISecret,
+		)
+		exchangesMap["hyperliquid"] = hyperliquidExchange
+		log.Printf("Hyperliquid exchange enabled")
+	}
 
 	// Coinbase exchange
-	coinbaseExchange := coinbase.NewClient(apiKey, apiSecret)
-	exchangesMap["coinbase"] = coinbaseExchange
+	if exchangeConfigs["coinbase"].Enabled {
+		coinbaseExchange := coinbase.NewClient(
+			exchangeConfigs["coinbase"].APIKey,
+			exchangeConfigs["coinbase"].APISecret, // Now expects private key PEM
+		)
+		exchangesMap["coinbase"] = coinbaseExchange
+		log.Printf("Coinbase exchange enabled")
+	}
 
 	// dYdX exchange
-	dydxExchange := dydx.NewClient(apiKey, apiSecret)
-	exchangesMap["dydx"] = dydxExchange
+	if exchangeConfigs["dydx"].Enabled {
+		var dydxExchange exchanges.Exchange
+		var err error
+
+		// Check if DYDX_MNEMONIC is set (preferred method)
+		mnemonic := os.Getenv("DYDX_MNEMONIC")
+		if mnemonic != "" {
+			// Use mnemonic-based authentication
+			dydxExchange, err = dydx.NewClientWithMnemonic(
+				mnemonic,
+				exchangeConfigs["dydx"].SubAccountNumber,
+			)
+			if err != nil {
+				return nil, nil, nil, nil, fmt.Errorf("failed to create dYdX client with mnemonic: %w", err)
+			}
+			log.Printf("dYdX exchange enabled (mnemonic authentication)")
+		} else if exchangeConfigs["dydx"].APISecret != "" {
+			// Use traditional API key authentication
+			dydxExchange = dydx.NewClient(
+				exchangeConfigs["dydx"].APIKey,
+				exchangeConfigs["dydx"].APISecret,
+			)
+			log.Printf("dYdX exchange enabled (API key authentication)")
+		} else {
+			return nil, nil, nil, nil, fmt.Errorf("dYdX enabled but no authentication method provided - set DYDX_MNEMONIC or DYDX_API_KEY/DYDX_API_SECRET")
+		}
+
+		exchangesMap["dydx"] = dydxExchange
+	}
+
+	if len(exchangesMap) == 0 {
+		return nil, nil, nil, nil, fmt.Errorf("no exchanges enabled - check ENABLE_* environment variables")
+	}
 
 	// Create aggregator
 	aggregator := exchanges.NewMultiExchangeAggregator(exchangesMap)
 
 	// Create strategy configuration
 	strategyConfig := strategy.DefaultConfig()
-	strategyConfig.Symbol = "BTC-USD"
+	strategyConfig.Symbol = os.Getenv("TRADING_SYMBOL")
+	if strategyConfig.Symbol == "" {
+		strategyConfig.Symbol = "BTC-USD"
+	}
 
-	// Create strategy (using hyperliquid as primary for now)
-	strategyEngine := strategy.NewScalpingStrategy(strategyConfig, hyperliquidExchange)
+	// Use the first enabled exchange as primary for strategy and order manager
+	var primaryExchange exchanges.Exchange
+	for _, exchange := range exchangesMap {
+		primaryExchange = exchange
+		break
+	}
 
-	// Create order manager (using hyperliquid as primary for now)
-	orderManager := order.NewManager(hyperliquidExchange)
+	// Create strategy
+	strategyEngine := strategy.NewScalpingStrategy(strategyConfig, primaryExchange)
+
+	// Create order manager
+	orderManager := order.NewManager(primaryExchange)
 
 	// Create risk manager
 	riskConfig := risk.DefaultConfig()
+	initialBalanceStr := os.Getenv("INITIAL_BALANCE")
 	initialBalance := decimal.NewFromFloat(defaultBalance)
+	if initialBalanceStr != "" {
+		if parsed, err := decimal.NewFromString(initialBalanceStr); err == nil {
+			initialBalance = parsed
+		}
+	}
 	riskManager := risk.NewManager(riskConfig, initialBalance)
 
 	return aggregator, strategyEngine, orderManager, riskManager, nil

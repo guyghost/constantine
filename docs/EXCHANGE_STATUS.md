@@ -126,8 +126,9 @@ EXCHANGE=hyperliquid ./bin/constantine --headless
 
 1. **API REST Coinbase Advanced Trade** :
    - Documentation: https://docs.cloud.coinbase.com/advanced-trade-api/
-   - Authentification JWT/API Keys
+   - Authentification: Clé privée ECDSA (PEM) + JWT ES256
    - Endpoints de trading
+   - ✅ Balances réelles implémentées
 
 2. **WebSocket** :
    - Coinbase Advanced Trade WebSocket
@@ -213,9 +214,10 @@ EXCHANGE_API_SECRET="word1 word2 ... word12"
    - [ ] Heartbeat/ping-pong
 
 4. **Coinbase** :
-   - [ ] API Advanced Trade
-   - [ ] Authentification
-   - [ ] Endpoints de base
+   - ✅ Balances réelles implémentées
+   - [ ] API Advanced Trade complète
+   - [ ] Authentification (clé privée ECDSA)
+   - [ ] Endpoints de trading
 
 ### Long terme
 
