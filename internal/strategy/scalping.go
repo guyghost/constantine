@@ -140,6 +140,11 @@ func (s *ScalpingStrategy) IsRunning() bool {
 	return s.running
 }
 
+// GetSignalGenerator returns the signal generator for backtesting
+func (s *ScalpingStrategy) GetSignalGenerator() *SignalGenerator {
+	return s.signalGenerator
+}
+
 // subscribeMarketData subscribes to market data streams
 func (s *ScalpingStrategy) subscribeMarketData(ctx context.Context) error {
 	// Subscribe to ticker

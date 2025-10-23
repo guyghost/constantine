@@ -205,10 +205,75 @@ TUI Agent:
 4. Configure risk management parameters
 5. Integrate with TUI for signal display
 
+### 4. Backtesting Agent (`internal/backtesting/`)
+
+The backtesting agent validates trading strategies against historical data.
+
+#### Engine (`engine.go`)
+- **State Management**:
+  - Current capital and equity tracking
+  - Open positions and trade history
+  - Equity curve generation
+- **Trade Execution**:
+  - Signal-based position opening/closing
+  - Stop loss and take profit management
+  - Commission and slippage simulation
+- **Key Methods**:
+  - `Run()` - Executes backtest on historical data
+  - `handleSignal()` - Processes trading signals
+  - `openPosition()` - Opens new positions with risk management
+  - `closePosition()` - Closes positions and records trades
+  - `calculateMetrics()` - Generates performance statistics
+
+#### Data Loader (`data_loader.go`)
+- **Data Sources**:
+  - CSV file import (timestamp, OHLCV format)
+  - Sample data generation for testing
+- **Timestamp Parsing**:
+  - Unix timestamps (seconds/milliseconds)
+  - RFC3339 and common date formats
+- **Key Methods**:
+  - `LoadFromCSV()` - Loads historical candles from CSV
+  - `GenerateSampleData()` - Creates synthetic test data
+
+#### Simulated Exchange (`simulated_exchange.go`)
+- **Purpose**: Mock exchange for backtesting
+- **Capabilities**:
+  - Historical candle replay
+  - Simulated order book
+  - Balance and position tracking
+- **Implementation**: Implements full `Exchange` interface
+
+#### Reporter (`reporter.go`)
+- **Report Types**:
+  - Performance summary report
+  - Detailed trade log
+  - Quick summary metrics
+- **Metrics Displayed**:
+  - Total return, annualized return
+  - Win rate, profit factor
+  - Max drawdown
+  - Trade statistics
+
+#### CLI Tool (`cmd/backtest/`)
+- **Usage**: `./bin/backtest --data=file.csv [options]`
+- **Options**:
+  - `--data`: Path to CSV file with historical data
+  - `--symbol`: Trading symbol (default: BTC-USD)
+  - `--capital`: Initial capital (default: $10,000)
+  - `--commission`: Commission rate (default: 0.1%)
+  - `--slippage`: Slippage rate (default: 0.05%)
+  - `--generate-sample`: Generate sample data instead of loading
+  - `--verbose`: Show detailed trade log
+- **Strategy Parameters**:
+  - `--short-ema`, `--long-ema`: EMA periods
+  - `--rsi-period`, `--rsi-oversold`, `--rsi-overbought`: RSI settings
+  - `--take-profit`, `--stop-loss`: Exit thresholds
+
 ### Future Agent Opportunities
-- **Risk Manager Agent**: Portfolio-level risk monitoring
+- **Risk Manager Agent**: Portfolio-level risk monitoring ✓ (Implemented in internal/risk/)
 - **Execution Agent**: Automated order placement based on signals
-- **Backtesting Agent**: Historical strategy validation
+- **Backtesting Agent**: Historical strategy validation ✓ (Implemented)
 - **Alert Agent**: Notification system for critical events
 - **Analytics Agent**: Performance metrics and reporting
 
