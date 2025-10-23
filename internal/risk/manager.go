@@ -114,7 +114,8 @@ func (m *Manager) CanTrade() (bool, string) {
 	// Check maximum drawdown
 	drawdown := m.calculateDrawdown()
 	if drawdown.GreaterThan(m.config.MaxDrawdown) {
-		return false, fmt.Sprintf("maximum drawdown exceeded: %.2f%%", drawdown)
+		drawdownFloat, _ := drawdown.Float64()
+		return false, fmt.Sprintf("maximum drawdown exceeded: %.2f%%", drawdownFloat)
 	}
 
 	return true, ""
@@ -133,8 +134,10 @@ func (m *Manager) ValidateOrder(req *order.OrderRequest, openPositions []*order.
 	// Check position size
 	positionSize := req.Amount.Mul(req.Price)
 	if positionSize.GreaterThan(m.config.MaxPositionSize) {
+		positionSizeFloat, _ := positionSize.Float64()
+		maxSizeFloat, _ := m.config.MaxPositionSize.Float64()
 		return fmt.Errorf("position size %.2f exceeds maximum %.2f",
-			positionSize, m.config.MaxPositionSize)
+			positionSizeFloat, maxSizeFloat)
 	}
 
 	// Validate position size based on risk per trade
