@@ -2,6 +2,7 @@ package exchanges
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -31,6 +32,14 @@ const (
 	OrderStatusFilled    OrderStatus = "filled"
 	OrderStatusCanceled  OrderStatus = "canceled"
 	OrderStatusPartially OrderStatus = "partially_filled"
+)
+
+// Common errors
+var (
+	ErrOrderNotFound    = errors.New("order not found")
+	ErrPositionNotFound = errors.New("position not found")
+	ErrNotConnected     = errors.New("exchange not connected")
+	ErrInvalidOrder     = errors.New("invalid order")
 )
 
 // Ticker represents market ticker data

@@ -14,17 +14,17 @@ import (
 
 // Engine is the backtesting engine
 type Engine struct {
-	config         *BacktestConfig
-	data           *HistoricalData
-	strategy       *strategy.ScalpingStrategy
-	exchange       *SimulatedExchange
+	config   *BacktestConfig
+	data     *HistoricalData
+	strategy *strategy.ScalpingStrategy
+	exchange *SimulatedExchange
 
 	// State
-	currentIndex   int
-	capital        decimal.Decimal
-	position       *Position
-	trades         []Trade
-	equityCurve    []EquityPoint
+	currentIndex int
+	capital      decimal.Decimal
+	position     *Position
+	trades       []Trade
+	equityCurve  []EquityPoint
 
 	// Callbacks
 	onTrade        func(*Trade)
@@ -124,7 +124,7 @@ func (e *Engine) feedCandleToStrategy(ctx context.Context, candle exchanges.Cand
 		start = 0
 	}
 
-	candles := e.data.Candles[start:e.currentIndex+1]
+	candles := e.data.Candles[start : e.currentIndex+1]
 
 	// Extract prices and volumes
 	prices := make([]decimal.Decimal, len(candles))
@@ -173,7 +173,7 @@ func (e *Engine) openPosition(signal *strategy.Signal, candle exchanges.Candle) 
 	}
 
 	// Calculate stop loss and take profit
-	stopLossPercent := decimal.NewFromFloat(0.0025) // Default 0.25%
+	stopLossPercent := decimal.NewFromFloat(0.0025)  // Default 0.25%
 	takeProfitPercent := decimal.NewFromFloat(0.005) // Default 0.5%
 
 	var stopLoss, takeProfit decimal.Decimal

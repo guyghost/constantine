@@ -21,13 +21,13 @@ var (
 	maxPositions   = flag.Int("max-positions", 1, "Maximum number of concurrent positions")
 
 	// Strategy parameters
-	shortEMA       = flag.Int("short-ema", 9, "Short EMA period")
-	longEMA        = flag.Int("long-ema", 21, "Long EMA period")
-	rsiPeriod      = flag.Int("rsi-period", 14, "RSI period")
-	rsiOversold    = flag.Float64("rsi-oversold", 30.0, "RSI oversold threshold")
-	rsiOverbought  = flag.Float64("rsi-overbought", 70.0, "RSI overbought threshold")
-	takeProfit     = flag.Float64("take-profit", 0.5, "Take profit percentage")
-	stopLoss       = flag.Float64("stop-loss", 0.25, "Stop loss percentage")
+	shortEMA      = flag.Int("short-ema", 9, "Short EMA period")
+	longEMA       = flag.Int("long-ema", 21, "Long EMA period")
+	rsiPeriod     = flag.Int("rsi-period", 14, "RSI period")
+	rsiOversold   = flag.Float64("rsi-oversold", 30.0, "RSI oversold threshold")
+	rsiOverbought = flag.Float64("rsi-overbought", 70.0, "RSI overbought threshold")
+	takeProfit    = flag.Float64("take-profit", 0.5, "Take profit percentage")
+	stopLoss      = flag.Float64("stop-loss", 0.25, "Stop loss percentage")
 
 	// Output options
 	verbose        = flag.Bool("verbose", false, "Show detailed trade log")
@@ -151,7 +151,7 @@ func run() error {
 	})
 
 	// Run backtest
-	log.Println("\n🚀 Running backtest...\n")
+	log.Println("🚀 Running backtest...")
 	startRun := time.Now()
 
 	metrics, err := engine.Run(stratConfig)

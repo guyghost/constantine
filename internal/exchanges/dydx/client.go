@@ -11,30 +11,64 @@ import (
 )
 
 const (
-	dydxAPIURL = "https://api.dydx.exchange"
-	dydxWSURL  = "wss://api.dydx.exchange/v4/ws"
+	dydxAPIURL = "https://indexer.dydx.trade"
+	dydxWSURL  = "wss://indexer.dydx.trade/v4/ws"
 )
 
 // Client implements the exchanges.Exchange interface for dYdX
 type Client struct {
 	apiKey     string
 	apiSecret  string
+	mnemonic   string
 	baseURL    string
 	wsURL      string
 	connected  bool
 	ws         *WebSocketClient
+	wallet     *Wallet
+	signer     *Signer
 	mu         sync.RWMutex
-	httpClient interface{} // Placeholder for HTTP client
+	httpClient *HTTPClient
 }
 
 // NewClient creates a new dYdX client
+// For dYdX, use apiSecret as the mnemonic phrase
 func NewClient(apiKey, apiSecret string) *Client {
-	return &Client{
+	c := &Client{
 		apiKey:    apiKey,
 		apiSecret: apiSecret,
+		mnemonic:  apiSecret, // apiSecret is the mnemonic for dYdX
 		baseURL:   dydxAPIURL,
 		wsURL:     dydxWSURL,
 	}
+	c.httpClient = NewHTTPClient(c.baseURL, apiKey, "")
+	return c
+}
+
+// NewClientWithMnemonic creates a new dYdX client with explicit mnemonic
+func NewClientWithMnemonic(mnemonic string, subAccountNumber int) (*Client, error) {
+	// Validate mnemonic
+	if err := ValidateMnemonic(mnemonic); err != nil {
+		return nil, fmt.Errorf("invalid mnemonic: %w", err)
+	}
+
+	// Create wallet from mnemonic
+	wallet, err := NewWalletFromMnemonic(mnemonic, subAccountNumber)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create wallet: %w", err)
+	}
+
+	// Create signer
+	signer := NewSigner(wallet)
+
+	c := &Client{
+		mnemonic:  mnemonic,
+		baseURL:   dydxAPIURL,
+		wsURL:     dydxWSURL,
+		wallet:    wallet,
+		signer:    signer,
+	}
+	c.httpClient = NewHTTPClient(c.baseURL, "", "")
+	return c, nil
 }
 
 // Name returns the exchange name
@@ -49,6 +83,16 @@ func (c *Client) Connect(ctx context.Context) error {
 
 	if c.connected {
 		return nil
+	}
+
+	// Initialize wallet from mnemonic if provided and not already initialized
+	if c.wallet == nil && c.mnemonic != "" && ValidateMnemonic(c.mnemonic) == nil {
+		wallet, err := NewWalletFromMnemonic(c.mnemonic, 0)
+		if err != nil {
+			return fmt.Errorf("failed to initialize wallet: %w", err)
+		}
+		c.wallet = wallet
+		c.signer = NewSigner(wallet)
 	}
 
 	// Initialize WebSocket client
@@ -87,38 +131,92 @@ func (c *Client) IsConnected() bool {
 
 // GetTicker retrieves ticker data
 func (c *Client) GetTicker(ctx context.Context, symbol string) (*exchanges.Ticker, error) {
-	// TODO: Implement REST API call
+	var resp TickerResponse
+	if err := c.httpClient.get(ctx, "/v4/perpetualMarkets", &resp); err != nil {
+		return nil, fmt.Errorf("failed to get ticker: %w", err)
+	}
+
+	marketTicker, ok := resp.Markets[symbol]
+	if !ok {
+		return nil, fmt.Errorf("market %s not found", symbol)
+	}
+
 	return &exchanges.Ticker{
 		Symbol:    symbol,
-		Bid:       decimal.NewFromFloat(50000),
-		Ask:       decimal.NewFromFloat(50001),
-		Last:      decimal.NewFromFloat(50000.5),
-		Volume24h: decimal.NewFromFloat(1000000),
+		Bid:       marketTicker.Bid,
+		Ask:       marketTicker.Ask,
+		Last:      marketTicker.Last,
+		Volume24h: marketTicker.Volume24h,
 		Timestamp: time.Now(),
 	}, nil
 }
 
 // GetOrderBook retrieves order book data
 func (c *Client) GetOrderBook(ctx context.Context, symbol string, depth int) (*exchanges.OrderBook, error) {
-	// TODO: Implement REST API call
+	var resp OrderBookResponse
+	path := fmt.Sprintf("/v4/orderbooks/perpetualMarket/%s", symbol)
+	if err := c.httpClient.get(ctx, path, &resp); err != nil {
+		return nil, fmt.Errorf("failed to get orderbook: %w", err)
+	}
+
+	// Convert bids
+	bids := make([]exchanges.Level, 0, len(resp.Bids))
+	for i, bid := range resp.Bids {
+		if i >= depth {
+			break
+		}
+		if len(bid) < 2 {
+			continue
+		}
+		price, _ := decimal.NewFromString(bid[0])
+		amount, _ := decimal.NewFromString(bid[1])
+		bids = append(bids, exchanges.Level{Price: price, Amount: amount})
+	}
+
+	// Convert asks
+	asks := make([]exchanges.Level, 0, len(resp.Asks))
+	for i, ask := range resp.Asks {
+		if i >= depth {
+			break
+		}
+		if len(ask) < 2 {
+			continue
+		}
+		price, _ := decimal.NewFromString(ask[0])
+		amount, _ := decimal.NewFromString(ask[1])
+		asks = append(asks, exchanges.Level{Price: price, Amount: amount})
+	}
+
 	return &exchanges.OrderBook{
-		Symbol: symbol,
-		Bids: []exchanges.Level{
-			{Price: decimal.NewFromFloat(50000), Amount: decimal.NewFromFloat(1.5)},
-			{Price: decimal.NewFromFloat(49999), Amount: decimal.NewFromFloat(2.0)},
-		},
-		Asks: []exchanges.Level{
-			{Price: decimal.NewFromFloat(50001), Amount: decimal.NewFromFloat(1.5)},
-			{Price: decimal.NewFromFloat(50002), Amount: decimal.NewFromFloat(2.0)},
-		},
+		Symbol:    symbol,
+		Bids:      bids,
+		Asks:      asks,
 		Timestamp: time.Now(),
 	}, nil
 }
 
 // GetCandles retrieves OHLCV data
 func (c *Client) GetCandles(ctx context.Context, symbol string, interval string, limit int) ([]exchanges.Candle, error) {
-	// TODO: Implement REST API call
-	return []exchanges.Candle{}, nil
+	var resp CandlesResponse
+	path := fmt.Sprintf("/v4/candles/perpetualMarkets/%s?resolution=%s&limit=%d", symbol, interval, limit)
+	if err := c.httpClient.get(ctx, path, &resp); err != nil {
+		return nil, fmt.Errorf("failed to get candles: %w", err)
+	}
+
+	candles := make([]exchanges.Candle, 0, len(resp.Candles))
+	for _, c := range resp.Candles {
+		candles = append(candles, exchanges.Candle{
+			Symbol:    symbol,
+			Timestamp: c.StartedAt,
+			Open:      c.Open,
+			High:      c.High,
+			Low:       c.Low,
+			Close:     c.Close,
+			Volume:    c.BaseTokenVolume,
+		})
+	}
+
+	return candles, nil
 }
 
 // SubscribeTicker subscribes to ticker updates
@@ -181,31 +279,116 @@ func (c *Client) GetOrderHistory(ctx context.Context, symbol string, limit int) 
 
 // GetBalance retrieves account balance
 func (c *Client) GetBalance(ctx context.Context) ([]exchanges.Balance, error) {
-	// TODO: Implement REST API call
-	return []exchanges.Balance{
-		{
-			Asset:     "USDC",
-			Free:      decimal.NewFromFloat(10000),
-			Locked:    decimal.NewFromFloat(1000),
-			Total:     decimal.NewFromFloat(11000),
-			UpdatedAt: time.Now(),
-		},
-	}, nil
+	if c.wallet == nil {
+		return nil, fmt.Errorf("wallet not initialized - provide mnemonic to access account data")
+	}
+
+	// Get subaccount data
+	var resp AccountResponse
+	path := fmt.Sprintf("/v4/addresses/%s", c.wallet.Address)
+	if err := c.httpClient.get(ctx, path, &resp); err != nil {
+		return nil, fmt.Errorf("failed to get account: %w", err)
+	}
+
+	balances := make([]exchanges.Balance, 0)
+	for _, subAccount := range resp.SubAccounts {
+		if subAccount.SubAccountNumber == c.wallet.SubAccountNumber {
+			// Parse asset positions (USDC balance)
+			for symbol, assetPos := range subAccount.AssetPositions {
+				balances = append(balances, exchanges.Balance{
+					Asset:     symbol,
+					Free:      assetPos.Size,
+					Locked:    decimal.Zero,
+					Total:     assetPos.Size,
+					UpdatedAt: time.Now(),
+				})
+			}
+
+			// If no specific assets, use equity
+			if len(balances) == 0 {
+				balances = append(balances, exchanges.Balance{
+					Asset:     "USDC",
+					Free:      subAccount.FreeCollateral,
+					Locked:    subAccount.Equity.Sub(subAccount.FreeCollateral),
+					Total:     subAccount.Equity,
+					UpdatedAt: time.Now(),
+				})
+			}
+		}
+	}
+
+	return balances, nil
 }
 
 // GetPositions retrieves all open positions
 func (c *Client) GetPositions(ctx context.Context) ([]exchanges.Position, error) {
-	// TODO: Implement REST API call
-	return []exchanges.Position{}, nil
+	if c.wallet == nil {
+		return nil, fmt.Errorf("wallet not initialized - provide mnemonic to access account data")
+	}
+
+	// Get subaccount data
+	var resp AccountResponse
+	path := fmt.Sprintf("/v4/addresses/%s", c.wallet.Address)
+	if err := c.httpClient.get(ctx, path, &resp); err != nil {
+		return nil, fmt.Errorf("failed to get account: %w", err)
+	}
+
+	positions := make([]exchanges.Position, 0)
+	for _, subAccount := range resp.SubAccounts {
+		if subAccount.SubAccountNumber == c.wallet.SubAccountNumber {
+			for _, posData := range subAccount.OpenPerpetualPositions {
+				var side exchanges.OrderSide
+				if posData.Side == "LONG" {
+					side = exchanges.OrderSideBuy
+				} else {
+					side = exchanges.OrderSideSell
+				}
+
+				positions = append(positions, exchanges.Position{
+					Symbol:        posData.Market,
+					Side:          side,
+					Size:          posData.Size,
+					EntryPrice:    posData.EntryPrice,
+					MarkPrice:     decimal.Zero, // Would need market data
+					Leverage:      decimal.NewFromInt(1),
+					UnrealizedPnL: posData.UnrealizedPnl,
+					RealizedPnL:   posData.RealizedPnl,
+				})
+			}
+		}
+	}
+
+	return positions, nil
 }
 
 // GetPosition retrieves a specific position
 func (c *Client) GetPosition(ctx context.Context, symbol string) (*exchanges.Position, error) {
-	// TODO: Implement REST API call
-	return nil, nil
+	// Note: dYdX v4 requires address/subaccount parameters
+	return nil, fmt.Errorf("not implemented - requires subaccount address")
 }
 
 // SupportedSymbols returns list of supported trading symbols
 func (c *Client) SupportedSymbols() []string {
 	return []string{"BTC-USD", "ETH-USD", "SOL-USD", "AVAX-USD"}
+}
+
+// GetWalletAddress returns the wallet address if initialized
+func (c *Client) GetWalletAddress() string {
+	if c.wallet == nil {
+		return ""
+	}
+	return c.wallet.Address
+}
+
+// GetSubAccountAddress returns the subaccount address if wallet is initialized
+func (c *Client) GetSubAccountAddress() string {
+	if c.wallet == nil {
+		return ""
+	}
+	return c.wallet.SubAccountAddress()
+}
+
+// IsAuthenticated returns true if the client has a wallet initialized
+func (c *Client) IsAuthenticated() bool {
+	return c.wallet != nil && c.signer != nil
 }

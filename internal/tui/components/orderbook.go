@@ -52,7 +52,7 @@ func RenderOrderBook(orderbook *exchanges.OrderBook, depth int) string {
 		spreadStyle := lipgloss.NewStyle().Foreground(warningColor).Bold(true)
 		content.WriteString(spreadStyle.Render(fmt.Sprintf("Spread: $%s (%.4f%%)\n",
 			spread.StringFixed(2),
-			spreadPercent)))
+			spreadPercent.InexactFloat64())))
 		content.WriteString("\n")
 	}
 
