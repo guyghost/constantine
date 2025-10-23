@@ -36,6 +36,27 @@ Exchange agents provide a unified interface for interacting with different crypt
   - `GetPositions()` - Retrieves open positions
   - `GetBalance()` - Gets account balances
 
+#### dYdX Agent (`internal/exchanges/dydx/client.go`)
+- **Type**: Decentralized Perpetuals Exchange Client (v4)
+- **Authentication**: API Key (read-only endpoints)
+- **Capabilities**:
+  - REST API market data retrieval
+  - WebSocket real-time data streams
+  - Historical candles (OHLCV)
+  - Order book depth queries
+  - Ticker and price feeds
+- **Key Methods**:
+  - `GetTicker()` - Retrieves current ticker data
+  - `GetOrderBook()` - Fetches order book with depth
+  - `GetCandles()` - Gets historical OHLCV candles
+  - `SubscribeTicker()` - Real-time ticker updates via WebSocket
+  - `SubscribeOrderBook()` - Real-time order book updates
+  - `SubscribeTrades()` - Real-time trade feed
+- **HTTP Client** (`http.go`): Handles REST API communication
+- **WebSocket Client** (`websocket.go`): Manages real-time data streams
+- **Type Definitions** (`types.go`): dYdX v4 API response structures
+- **Note**: Trading operations require additional setup with subaccount addresses and signing
+
 ### 2. Strategy Agent (`internal/strategy/scalping.go`)
 
 The strategy agent implements technical analysis-based trading logic.
@@ -294,6 +315,8 @@ Exchange agents require specific credentials:
 - **dYdX** (planned): API credentials
 
 Store credentials securely using environment variables or encrypted configuration files.
+
+The bot automatically loads environment variables from a .env file in the project root if it exists.
 
 ## Monitoring & Observability
 

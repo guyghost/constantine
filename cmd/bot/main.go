@@ -12,11 +12,13 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/guyghost/constantine/internal/exchanges"
+	"github.com/guyghost/constantine/internal/exchanges/dydx"
 	"github.com/guyghost/constantine/internal/exchanges/hyperliquid"
 	"github.com/guyghost/constantine/internal/order"
 	"github.com/guyghost/constantine/internal/risk"
 	"github.com/guyghost/constantine/internal/strategy"
 	"github.com/guyghost/constantine/internal/tui"
+	"github.com/joho/godotenv"
 	"github.com/shopspring/decimal"
 )
 
@@ -31,6 +33,9 @@ var (
 )
 
 func main() {
+	// Load .env file if it exists
+	godotenv.Load()
+
 	flag.Parse()
 
 	if err := run(); err != nil {
@@ -117,14 +122,26 @@ func initializeBot(ctx context.Context) (
 		exchangeType = "hyperliquid"
 	}
 
+	// Warn if credentials are empty (demo mode)
+	if apiKey == "" && apiSecret == "" {
+		log.Println("⚠️  WARNING: No API credentials provided")
+		log.Println("⚠️  Running in DEMO MODE - exchange data may be mocked")
+		log.Println("⚠️  Set EXCHANGE_API_KEY and EXCHANGE_API_SECRET to connect to real exchange")
+	} else if apiSecret == "" && exchangeType == "dydx" {
+		log.Println("⚠️  WARNING: dYdX requires EXCHANGE_API_SECRET (mnemonic phrase)")
+		log.Println("⚠️  Running in READ-ONLY MODE - cannot access account data")
+	} else {
+		log.Printf("✓ Using credentials for %s exchange", exchangeType)
+	}
+
 	var exchange exchanges.Exchange
 	switch exchangeType {
 	case "hyperliquid":
 		exchange = hyperliquid.NewClient(apiKey, apiSecret)
+	case "dydx":
+		exchange = dydx.NewClient(apiKey, apiSecret)
 	// case "coinbase":
 	// 	exchange = coinbase.NewClient(apiKey, apiSecret)
-	// case "dydx":
-	// 	exchange = dydx.NewClient(apiKey, apiSecret)
 	default:
 		exchange = hyperliquid.NewClient(apiKey, apiSecret)
 	}
@@ -303,7 +320,8 @@ func runHeadless(
 	riskManager *risk.Manager,
 ) error {
 	log.Println("=== Constantine Trading Bot - Headless Mode ===")
-	log.Printf("Exchange: Hyperliquid (Demo Mode)")
+	log.Printf("Exchange: %s", exchange.Name())
+	log.Printf("Connected: %v", exchange.IsConnected())
 	log.Printf("Strategy: Scalping with EMA/RSI/Bollinger Bands")
 	log.Println("Press Ctrl+C to stop")
 	log.Println("===============================================")
