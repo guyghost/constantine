@@ -8,14 +8,16 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/cosmos/cosmos-sdk/types/bech32"
 	"github.com/tyler-smith/go-bip39"
+	"golang.org/x/crypto/ripemd160"
 )
 
 // Wallet represents a dYdX wallet derived from mnemonic
 type Wallet struct {
-	Mnemonic       string
-	Address        string
-	PrivateKeyHex  string
+	Mnemonic         string
+	Address          string
+	PrivateKeyHex    string
 	SubAccountNumber int
 }
 
@@ -35,14 +37,14 @@ func NewWalletFromMnemonic(mnemonic string, subAccountNumber int) (*Wallet, erro
 		return nil, fmt.Errorf("failed to create master key: %w", err)
 	}
 
-	// dYdX uses BIP44 path: m/44'/118'/0'/0/0
+	// dYdX uses Cosmos derivation path: m/44'/118'/0'/0/0
 	// 118 is the coin type for Cosmos
 	purpose, err := masterKey.Derive(hdkeychain.HardenedKeyStart + 44)
 	if err != nil {
 		return nil, fmt.Errorf("failed to derive purpose: %w", err)
 	}
 
-	coinType, err := purpose.Derive(hdkeychain.HardenedKeyStart + 118)
+	coinType, err := purpose.Derive(hdkeychain.HardenedKeyStart + 118) // Cosmos coin type
 	if err != nil {
 		return nil, fmt.Errorf("failed to derive coin type: %w", err)
 	}
@@ -70,7 +72,7 @@ func NewWalletFromMnemonic(mnemonic string, subAccountNumber int) (*Wallet, erro
 
 	privKeyHex := hex.EncodeToString(privKey.Serialize())
 
-	// Derive Cosmos/dYdX address from public key
+	// Derive dYdX address from public key (Cosmos format)
 	pubKey := privKey.PubKey()
 	address := deriveCosmosAddress(pubKey.SerializeCompressed())
 
@@ -85,14 +87,19 @@ func NewWalletFromMnemonic(mnemonic string, subAccountNumber int) (*Wallet, erro
 // deriveCosmosAddress derives a Cosmos address from a public key
 func deriveCosmosAddress(pubKey []byte) string {
 	// SHA256 hash of public key
-	hash := sha256.Sum256(pubKey)
+	sha256Hash := sha256.Sum256(pubKey)
 
-	// Take first 20 bytes (160 bits)
-	addressBytes := hash[:20]
+	// RIPEMD160 hash of SHA256
+	ripemd := ripemd160.New()
+	ripemd.Write(sha256Hash[:])
+	addressBytes := ripemd.Sum(nil)
 
 	// Convert to bech32 with "dydx" prefix
-	// Note: This is a simplified version. In production, use proper bech32 encoding
-	address := "dydx" + hex.EncodeToString(addressBytes)[:40]
+	address, err := bech32.ConvertAndEncode("dydx", addressBytes)
+	if err != nil {
+		// Fallback to hex if bech32 fails
+		return "dydx" + hex.EncodeToString(addressBytes)
+	}
 
 	return address
 }
