@@ -1,6 +1,7 @@
 package coinbase
 
 import (
+	"context"
 	"testing"
 
 	"github.com/guyghost/constantine/internal/exchanges"
@@ -69,48 +70,55 @@ func TestSupportedSymbols(t *testing.T) {
 }
 
 func TestGetBalance(t *testing.T) {
-	client := NewClient("", "")
+	client := NewClient("", "") // No API keys for testing
 
-	balances, err := client.GetBalance(nil)
-	if err != nil {
-		t.Fatalf("GetBalance returned error: %v", err)
+	// Test with valid context but no API keys - should fail with auth error
+	ctx := context.Background()
+	balances, err := client.GetBalance(ctx)
+
+	// Should fail because no API keys provided
+	if err == nil {
+		t.Error("Expected GetBalance to fail without API keys")
 	}
 
-	if len(balances) == 0 {
-		t.Fatal("GetBalance returned empty balances")
-	}
-
-	// Check USD balance
-	usdBalance := balances[0]
-	if usdBalance.Asset != "USD" {
-		t.Errorf("Expected first balance to be USD, got %s", usdBalance.Asset)
-	}
-
-	if !usdBalance.Total.Equal(decimal.NewFromFloat(11000)) {
-		t.Errorf("Expected USD total 11000, got %s", usdBalance.Total.String())
+	// If somehow it succeeds (mock data), check structure
+	if err == nil && len(balances) > 0 {
+		for _, balance := range balances {
+			if balance.Asset == "" {
+				t.Error("Balance should have non-empty asset")
+			}
+			if balance.Total.LessThan(decimal.Zero) {
+				t.Error("Balance total should not be negative")
+			}
+			if balance.UpdatedAt.IsZero() {
+				t.Error("Balance should have UpdatedAt timestamp")
+			}
+		}
 	}
 }
 
 func TestGetPositions(t *testing.T) {
-	client := NewClient("", "")
+	client := NewClient("", "") // No API keys for testing
 
-	positions, err := client.GetPositions(nil)
-	if err != nil {
-		t.Fatalf("GetPositions returned error: %v", err)
+	// Test with valid context but no API keys - should fail with auth error
+	ctx := context.Background()
+	positions, err := client.GetPositions(ctx)
+
+	// Should fail because no API keys provided
+	if err == nil {
+		t.Error("Expected GetPositions to fail without API keys")
 	}
 
-	// Should have at least one position (BTC)
-	if len(positions) == 0 {
-		t.Fatal("GetPositions returned empty positions")
-	}
-
-	btcPosition := positions[0]
-	if btcPosition.Symbol != "BTC-USD" {
-		t.Errorf("Expected position symbol BTC-USD, got %s", btcPosition.Symbol)
-	}
-
-	if !btcPosition.Size.Equal(decimal.NewFromFloat(0.6)) {
-		t.Errorf("Expected BTC size 0.6, got %s", btcPosition.Size.String())
+	// If somehow it succeeds, check structure
+	if err == nil && len(positions) > 0 {
+		for _, position := range positions {
+			if position.Symbol == "" {
+				t.Error("Position should have non-empty symbol")
+			}
+			if position.Size.LessThanOrEqual(decimal.Zero) {
+				t.Error("Position size should be positive")
+			}
+		}
 	}
 }
 

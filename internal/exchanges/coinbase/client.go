@@ -2,6 +2,9 @@ package coinbase
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -37,8 +40,72 @@ func NewHTTPClient(baseURL, apiKey, apiSecret string) *HTTPClient {
 	}
 }
 
+// createJWT creates a JWT token for Coinbase API authentication
+func (c *HTTPClient) createJWT(method, path string, body string) (string, error) {
+	if c.apiKey == "" || c.apiSecret == "" {
+		return "", fmt.Errorf("API key and secret required for authentication")
+	}
+
+	// JWT Header
+	header := map[string]interface{}{
+		"alg": "HS256",
+		"typ": "JWT",
+		"kid": c.apiKey,
+	}
+
+	// JWT Payload
+	now := time.Now().UTC()
+	payload := map[string]interface{}{
+		"iss": "coinbase-cloud",
+		"nbf": now.Unix(),
+		"exp": now.Add(2 * time.Minute).Unix(),
+		"sub": c.apiKey,
+		"uri": fmt.Sprintf("%s%s", method, path),
+	}
+
+	if body != "" {
+		payload["body_hash"] = c.hashSHA256(body)
+	}
+
+	// Encode header
+	headerJSON, err := json.Marshal(header)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal header: %w", err)
+	}
+	headerB64 := base64.RawURLEncoding.EncodeToString(headerJSON)
+
+	// Encode payload
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal payload: %w", err)
+	}
+	payloadB64 := base64.RawURLEncoding.EncodeToString(payloadJSON)
+
+	// Create signature
+	message := headerB64 + "." + payloadB64
+	signature := c.signHMAC(message, c.apiSecret)
+	signatureB64 := base64.RawURLEncoding.EncodeToString(signature)
+
+	// Create JWT
+	jwt := headerB64 + "." + payloadB64 + "." + signatureB64
+	return jwt, nil
+}
+
+// hashSHA256 creates a SHA256 hash of the input string
+func (c *HTTPClient) hashSHA256(data string) string {
+	hash := sha256.Sum256([]byte(data))
+	return base64.StdEncoding.EncodeToString(hash[:])
+}
+
+// signHMAC creates an HMAC-SHA256 signature
+func (c *HTTPClient) signHMAC(message, secret string) []byte {
+	h := hmac.New(sha256.New, []byte(secret))
+	h.Write([]byte(message))
+	return h.Sum(nil)
+}
+
 // doRequest performs an HTTP request
-func (c *HTTPClient) doRequest(ctx context.Context, method, path string, _ any, result any) error {
+func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body any, result any) error {
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
@@ -46,15 +113,35 @@ func (c *HTTPClient) doRequest(ctx context.Context, method, path string, _ any, 
 
 	// Set headers
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Constantine-Trading-Bot/1.0")
+
+	// Add JWT authentication if API key is available
+	if c.apiKey != "" && c.apiSecret != "" {
+		var bodyStr string
+		if body != nil {
+			bodyBytes, err := json.Marshal(body)
+			if err != nil {
+				return fmt.Errorf("failed to marshal body: %w", err)
+			}
+			bodyStr = string(bodyBytes)
+		}
+
+		jwt, err := c.createJWT(method, path, bodyStr)
+		if err != nil {
+			return fmt.Errorf("failed to create JWT: %w", err)
+		}
+
+		req.Header.Set("Authorization", "Bearer "+jwt)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to execute request: %w", err)
+		return fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("API error: status=%d", resp.StatusCode)
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("API error: %s", resp.Status)
 	}
 
 	if result != nil {
@@ -439,24 +526,42 @@ type CoinbaseAccountsResponse struct {
 
 // GetBalance retrieves account balance
 func (c *Client) GetBalance(ctx context.Context) ([]exchanges.Balance, error) {
-	// TODO: Implement authentication and real API call
-	// For now, return mock data
-	return []exchanges.Balance{
-		{
-			Asset:     "USD",
-			Free:      decimal.NewFromFloat(10000),
-			Locked:    decimal.NewFromFloat(1000),
-			Total:     decimal.NewFromFloat(11000),
-			UpdatedAt: time.Now(),
-		},
-		{
-			Asset:     "BTC",
-			Free:      decimal.NewFromFloat(0.5),
-			Locked:    decimal.NewFromFloat(0.1),
-			Total:     decimal.NewFromFloat(0.6),
-			UpdatedAt: time.Now(),
-		},
-	}, nil
+	var response CoinbaseAccountsResponse
+	err := c.httpClient.doRequest(ctx, "GET", "/brokerage/accounts", nil, &response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get accounts: %w", err)
+	}
+
+	balances := make([]exchanges.Balance, 0, len(response.Accounts))
+	for _, account := range response.Accounts {
+		// Parse available balance
+		available, err := decimal.NewFromString(account.Available)
+		if err != nil {
+			continue // Skip accounts with invalid balance
+		}
+
+		// Parse hold balance
+		hold, err := decimal.NewFromString(account.Hold)
+		if err != nil {
+			continue // Skip accounts with invalid hold
+		}
+
+		// Calculate total balance
+		total := available.Add(hold)
+
+		// Only include accounts with non-zero balance
+		if total.GreaterThan(decimal.Zero) {
+			balances = append(balances, exchanges.Balance{
+				Asset:     account.Currency,
+				Free:      available,
+				Locked:    hold,
+				Total:     total,
+				UpdatedAt: time.Now(),
+			})
+		}
+	}
+
+	return balances, nil
 }
 
 // GetPositions retrieves all open positions
