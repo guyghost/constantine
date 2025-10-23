@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/guyghost/constantine/internal/exchanges"
+	"github.com/shopspring/decimal"
 )
 
 var (
@@ -76,6 +78,8 @@ func (m Model) View() string {
 		content = m.renderPositions()
 	case ViewOrders:
 		content = m.renderOrders()
+	case ViewExchanges:
+		content = m.renderExchanges()
 	case ViewSettings:
 		content = m.renderSettings()
 	}
@@ -114,7 +118,7 @@ func (m Model) renderHeader() string {
 
 	statusText := statusStyle.Render(status)
 
-	exchange := mutedStyle.Render(fmt.Sprintf("Exchange: %s", m.exchange.Name()))
+	exchange := mutedStyle.Render("Multi-Exchange: Hyperliquid, Coinbase, dYdX")
 
 	return lipgloss.JoinHorizontal(
 		lipgloss.Top,
@@ -142,7 +146,7 @@ func (m Model) renderStatusBar() string {
 // renderHelp renders the help text
 func (m Model) renderHelp() string {
 	helps := []string{
-		"[1-5] Switch view",
+		"[1-6] Switch view",
 		"[s] Start/Stop",
 		"[r] Refresh",
 		"[c] Clear error",
@@ -178,29 +182,38 @@ func (m Model) renderSummary() string {
 
 	content.WriteString(headerStyle.Render("Summary") + "\n\n")
 
-	// Balance
-	if m.riskStats != nil {
-		balance := m.riskStats.CurrentBalance.StringFixed(2)
-		content.WriteString(fmt.Sprintf("Balance:     %s\n", successStyle.Render("$"+balance)))
+	// Get aggregated data
+	data := m.aggregator.GetAggregatedData()
 
-		pnl := m.riskStats.DailyPnL.StringFixed(2)
-		pnlStyle := successStyle
-		if m.riskStats.DailyPnL.IsNegative() {
-			pnlStyle = errorStyle
-		}
-		content.WriteString(fmt.Sprintf("Daily P&L:   %s\n", pnlStyle.Render("$"+pnl)))
+	// Total Balance
+	totalBalance := data.TotalBalance.StringFixed(2)
+	content.WriteString(fmt.Sprintf("Total Balance: %s\n", successStyle.Render("$"+totalBalance)))
 
-		drawdown := fmt.Sprintf("%.2f%%", m.riskStats.CurrentDrawdown)
-		content.WriteString(fmt.Sprintf("Drawdown:    %s\n", warningStyle.Render(drawdown)))
+	// Total PnL
+	totalPnL := data.TotalPnL.StringFixed(2)
+	pnlStyle := successStyle
+	if data.TotalPnL.IsNegative() {
+		pnlStyle = errorStyle
 	}
+	content.WriteString(fmt.Sprintf("Total P&L:     %s\n", pnlStyle.Render("$"+totalPnL)))
 
-	// Positions
+	// Exchange connections
+	connectedCount := 0
+	totalCount := len(data.Exchanges)
+	for _, exchangeData := range data.Exchanges {
+		if exchangeData.Connected {
+			connectedCount++
+		}
+	}
+	content.WriteString(fmt.Sprintf("Exchanges:     %d/%d connected\n", connectedCount, totalCount))
+
+	// Positions (from primary exchange for now)
 	posCount := len(m.positions)
-	content.WriteString(fmt.Sprintf("Positions:   %d\n", posCount))
+	content.WriteString(fmt.Sprintf("Positions:     %d\n", posCount))
 
 	// Orders
 	orderCount := len(m.openOrders)
-	content.WriteString(fmt.Sprintf("Open Orders: %d\n", orderCount))
+	content.WriteString(fmt.Sprintf("Open Orders:   %d\n", orderCount))
 
 	return boxStyle.Render(content.String())
 }
@@ -317,12 +330,27 @@ func (m Model) renderPositions() string {
 
 	content.WriteString(headerStyle.Render("Open Positions") + "\n\n")
 
-	if len(m.positions) == 0 {
+	// Get aggregated data
+	data := m.aggregator.GetAggregatedData()
+
+	allPositions := make([]*exchanges.Position, 0)
+
+	// Collect positions from all exchanges
+	for exchangeName, exchangeData := range data.Exchanges {
+		for _, pos := range exchangeData.Positions {
+			// Add exchange name to distinguish positions
+			posWithExchange := pos
+			posWithExchange.Symbol = fmt.Sprintf("%s (%s)", pos.Symbol, exchangeName)
+			allPositions = append(allPositions, &posWithExchange)
+		}
+	}
+
+	if len(allPositions) == 0 {
 		content.WriteString(mutedStyle.Render("No open positions"))
 	} else {
-		for _, pos := range m.positions {
+		for _, pos := range allPositions {
 			sideStyle := successStyle
-			if pos.Side == "short" {
+			if pos.Side == exchanges.OrderSideSell {
 				sideStyle = errorStyle
 			}
 
@@ -330,7 +358,7 @@ func (m Model) renderPositions() string {
 				pos.Symbol,
 				sideStyle.Render(string(pos.Side))))
 			content.WriteString(fmt.Sprintf("  Entry:  $%s\n", pos.EntryPrice.StringFixed(2)))
-			content.WriteString(fmt.Sprintf("  Amount: %s\n", pos.Amount.StringFixed(4)))
+			content.WriteString(fmt.Sprintf("  Size:   %s\n", pos.Size.StringFixed(4)))
 			content.WriteString(fmt.Sprintf("  PnL:    $%s\n", pos.UnrealizedPnL.StringFixed(2)))
 			content.WriteString("\n")
 		}
@@ -363,6 +391,55 @@ func (m Model) renderOrders() string {
 			content.WriteString(fmt.Sprintf("  Status: %s\n", order.Status))
 			content.WriteString("\n")
 		}
+	}
+
+	return boxStyle.Render(content.String())
+}
+
+// renderExchanges renders the exchanges status view
+func (m Model) renderExchanges() string {
+	var content strings.Builder
+
+	content.WriteString(headerStyle.Render("Exchange Status") + "\n\n")
+
+	// Get aggregated data
+	data := m.aggregator.GetAggregatedData()
+
+	for exchangeName, exchangeData := range data.Exchanges {
+		status := "✗ DISCONNECTED"
+		statusStyle := errorStyle
+		if exchangeData.Connected {
+			status = "✓ CONNECTED"
+			statusStyle = successStyle
+		}
+
+		content.WriteString(fmt.Sprintf("%s: %s\n", exchangeName, statusStyle.Render(status)))
+
+		if exchangeData.Error != nil {
+			content.WriteString(fmt.Sprintf("  Error: %s\n", errorStyle.Render(exchangeData.Error.Error())))
+		}
+
+		// Show balances
+		for _, balance := range exchangeData.Balances {
+			if balance.Total.GreaterThan(decimal.Zero) {
+				content.WriteString(fmt.Sprintf("  Balance: %s $%s\n",
+					balance.Asset, successStyle.Render(balance.Total.StringFixed(2))))
+			}
+		}
+
+		// Show positions count
+		posCount := len(exchangeData.Positions)
+		if posCount > 0 {
+			content.WriteString(fmt.Sprintf("  Positions: %d\n", posCount))
+		}
+
+		// Show orders count
+		orderCount := len(exchangeData.Orders)
+		if orderCount > 0 {
+			content.WriteString(fmt.Sprintf("  Orders: %d\n", orderCount))
+		}
+
+		content.WriteString("\n")
 	}
 
 	return boxStyle.Render(content.String())

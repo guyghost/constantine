@@ -13,7 +13,7 @@ import (
 // Model represents the TUI application model
 type Model struct {
 	// Bot state
-	exchange     exchanges.Exchange
+	aggregator   *exchanges.MultiExchangeAggregator
 	strategy     *strategy.ScalpingStrategy
 	orderManager *order.Manager
 	riskManager  *risk.Manager
@@ -47,18 +47,19 @@ const (
 	ViewOrderBook
 	ViewPositions
 	ViewOrders
+	ViewExchanges
 	ViewSettings
 )
 
 // NewModel creates a new TUI model
 func NewModel(
-	exchange exchanges.Exchange,
+	aggregator *exchanges.MultiExchangeAggregator,
 	strategy *strategy.ScalpingStrategy,
 	orderManager *order.Manager,
 	riskManager *risk.Manager,
 ) Model {
 	return Model{
-		exchange:     exchange,
+		aggregator:   aggregator,
 		strategy:     strategy,
 		orderManager: orderManager,
 		riskManager:  riskManager,

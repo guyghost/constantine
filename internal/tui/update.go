@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"context"
+
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -93,6 +95,11 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "5":
+		// Switch to exchanges view
+		m.SetActiveView(ViewExchanges)
+		return m, nil
+
+	case "6":
 		// Switch to settings view
 		m.SetActiveView(ViewSettings)
 		return m, nil
@@ -127,8 +134,34 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // fetchData fetches latest data from the bot
 func (m Model) fetchData() tea.Cmd {
 	return func() tea.Msg {
-		// This would be called periodically to fetch data
-		// In a real implementation, this would fetch data from the bot components
+		ctx := context.Background()
+
+		// Refresh data from all exchanges
+		if err := m.aggregator.RefreshData(ctx); err != nil {
+			m.SetError(err)
+			return nil
+		}
+
+		// Update positions from order manager (primary exchange)
+		positions := m.orderManager.GetPositions()
+		m.UpdatePositions(positions)
+
+		// Update orders from order manager
+		orders := m.orderManager.GetOpenOrders()
+		m.UpdateOrders(orders)
+
+		// Update risk stats
+		if m.riskManager != nil {
+			stats := m.riskManager.GetStats()
+			m.UpdateRiskStats(stats)
+		}
+
+		// Update order stats
+		if m.orderManager != nil {
+			stats := m.orderManager.GetStats()
+			m.UpdateOrderStats(stats)
+		}
+
 		return nil
 	}
 }

@@ -58,16 +58,16 @@ func run() error {
 	}()
 
 	// Initialize components
-	exchange, strategyEngine, orderManager, riskManager, err := initializeBot(ctx)
+	aggregator, strategyEngine, orderManager, riskManager, err := initializeBot(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to initialize bot: %w", err)
 	}
 
-	// Connect to exchange
-	if err := exchange.Connect(ctx); err != nil {
-		return fmt.Errorf("failed to connect to exchange: %w", err)
+	// Connect to all exchanges
+	if err := aggregator.ConnectAll(ctx); err != nil {
+		return fmt.Errorf("failed to connect to exchanges: %w", err)
 	}
-	defer exchange.Disconnect()
+	defer aggregator.DisconnectAll()
 
 	// Setup callbacks
 	setupCallbacks(strategyEngine, orderManager, riskManager)
@@ -81,11 +81,11 @@ func run() error {
 
 	// Run in headless or TUI mode
 	if *headless {
-		return runHeadless(ctx, exchange, strategyEngine, orderManager, riskManager)
+		return runHeadless(ctx, aggregator, strategyEngine, orderManager, riskManager)
 	}
 
 	// Create TUI model
-	model := tui.NewModel(exchange, strategyEngine, orderManager, riskManager)
+	model := tui.NewModel(aggregator, strategyEngine, orderManager, riskManager)
 
 	// Start the TUI
 	p := tea.NewProgram(model, tea.WithAltScreen())
@@ -100,7 +100,7 @@ func run() error {
 
 // initializeBot initializes all bot components
 func initializeBot(ctx context.Context) (
-	exchanges.Exchange,
+	*exchanges.MultiExchangeAggregator,
 	*strategy.ScalpingStrategy,
 	*order.Manager,
 	*risk.Manager,
@@ -117,52 +117,40 @@ func initializeBot(ctx context.Context) (
 		apiSecret = defaultAPISecret
 	}
 
-	// Choose exchange based on environment variable
-	exchangeType := os.Getenv("EXCHANGE")
-	if exchangeType == "" {
-		exchangeType = "hyperliquid"
-	}
+	// Create all exchange clients
+	exchangesMap := make(map[string]exchanges.Exchange)
 
-	// Warn if credentials are empty (demo mode)
-	if apiKey == "" && apiSecret == "" {
-		log.Println("⚠️  WARNING: No API credentials provided")
-		log.Println("⚠️  Running in DEMO MODE - exchange data may be mocked")
-		log.Println("⚠️  Set EXCHANGE_API_KEY and EXCHANGE_API_SECRET to connect to real exchange")
-	} else if apiSecret == "" && exchangeType == "dydx" {
-		log.Println("⚠️  WARNING: dYdX requires EXCHANGE_API_SECRET (mnemonic phrase)")
-		log.Println("⚠️  Running in READ-ONLY MODE - cannot access account data")
-	} else {
-		log.Printf("✓ Using credentials for %s exchange", exchangeType)
-	}
+	// Hyperliquid exchange
+	hyperliquidExchange := hyperliquid.NewClient(apiKey, apiSecret)
+	exchangesMap["hyperliquid"] = hyperliquidExchange
 
-	var exchange exchanges.Exchange
-	switch exchangeType {
-	case "hyperliquid":
-		exchange = hyperliquid.NewClient(apiKey, apiSecret)
-	case "dydx":
-		exchange = dydx.NewClient(apiKey, apiSecret)
-	case "coinbase":
-		exchange = coinbase.NewClient(apiKey, apiSecret)
-	default:
-		exchange = hyperliquid.NewClient(apiKey, apiSecret)
-	}
+	// Coinbase exchange
+	coinbaseExchange := coinbase.NewClient(apiKey, apiSecret)
+	exchangesMap["coinbase"] = coinbaseExchange
+
+	// dYdX exchange
+	dydxExchange := dydx.NewClient(apiKey, apiSecret)
+	exchangesMap["dydx"] = dydxExchange
+
+	// Create aggregator
+	aggregator := exchanges.NewMultiExchangeAggregator(exchangesMap)
 
 	// Create strategy configuration
 	strategyConfig := strategy.DefaultConfig()
 	strategyConfig.Symbol = "BTC-USD"
 
-	// Create strategy
-	strategyEngine := strategy.NewScalpingStrategy(strategyConfig, exchange)
+	// Create strategy (using hyperliquid as primary for now)
+	strategyEngine := strategy.NewScalpingStrategy(strategyConfig, hyperliquidExchange)
 
-	// Create order manager
-	orderManager := order.NewManager(exchange)
+	// Create order manager (using hyperliquid as primary for now)
+	orderManager := order.NewManager(hyperliquidExchange)
 
 	// Create risk manager
 	riskConfig := risk.DefaultConfig()
 	initialBalance := decimal.NewFromFloat(defaultBalance)
 	riskManager := risk.NewManager(riskConfig, initialBalance)
 
-	return exchange, strategyEngine, orderManager, riskManager, nil
+	return aggregator, strategyEngine, orderManager, riskManager, nil
 }
 
 // setupCallbacks sets up callbacks between components
@@ -315,14 +303,13 @@ func startBotComponents(
 // runHeadless runs the bot in headless mode with periodic status updates
 func runHeadless(
 	ctx context.Context,
-	exchange exchanges.Exchange,
+	aggregator *exchanges.MultiExchangeAggregator,
 	strategyEngine *strategy.ScalpingStrategy,
 	orderManager *order.Manager,
 	riskManager *risk.Manager,
 ) error {
 	log.Println("=== Constantine Trading Bot - Headless Mode ===")
-	log.Printf("Exchange: %s", exchange.Name())
-	log.Printf("Connected: %v", exchange.IsConnected())
+	log.Printf("Multi-Exchange Mode: Connected to Hyperliquid, Coinbase, dYdX")
 	log.Printf("Strategy: Scalping with EMA/RSI/Bollinger Bands")
 	log.Println("Press Ctrl+C to stop")
 	log.Println("===============================================")
@@ -337,38 +324,60 @@ func runHeadless(
 			return nil
 
 		case <-ticker.C:
+			// Refresh data from all exchanges
+			if err := aggregator.RefreshData(ctx); err != nil {
+				log.Printf("[STATUS] Failed to refresh data: %v", err)
+			}
+
 			// Log periodic status updates
-			logStatus(exchange, orderManager, riskManager)
+			logAggregatedStatus(aggregator, orderManager, riskManager)
 		}
 	}
 }
 
-// logStatus logs the current status of the bot
-func logStatus(
-	exchange exchanges.Exchange,
+// logAggregatedStatus logs the current aggregated status of all exchanges
+func logAggregatedStatus(
+	aggregator *exchanges.MultiExchangeAggregator,
 	orderManager *order.Manager,
 	riskManager *risk.Manager,
 ) {
-	ctx := context.Background()
+	data := aggregator.GetAggregatedData()
 
-	// Get balance
-	balances, err := exchange.GetBalance(ctx)
-	if err != nil {
-		log.Printf("[STATUS] Failed to get balance: %v", err)
-	} else if len(balances) > 0 {
-		log.Printf("[STATUS] Balance: %s $%s", balances[0].Asset, balances[0].Total.StringFixed(2))
+	log.Printf("[STATUS] Total Balance: $%s", data.TotalBalance.StringFixed(2))
+	log.Printf("[STATUS] Total PnL: $%s", data.TotalPnL.StringFixed(2))
+
+	// Log each exchange status
+	for name, exchangeData := range data.Exchanges {
+		status := "✓"
+		if !exchangeData.Connected {
+			status = "✗"
+		}
+
+		log.Printf("[STATUS] %s %s: Connected=%v", status, name, exchangeData.Connected)
+
+		if exchangeData.Error != nil {
+			log.Printf("  - Error: %v", exchangeData.Error)
+		}
+
+		// Log balances
+		for _, balance := range exchangeData.Balances {
+			if balance.Total.GreaterThan(decimal.Zero) {
+				log.Printf("  - Balance: %s $%s", balance.Asset, balance.Total.StringFixed(2))
+			}
+		}
+
+		// Log positions
+		for _, position := range exchangeData.Positions {
+			log.Printf("  - Position: %s %s @ $%s, PnL: $%s",
+				position.Symbol, position.Side,
+				position.EntryPrice.StringFixed(2),
+				position.UnrealizedPnL.StringFixed(2))
+		}
 	}
 
-	// Get positions
+	// Get positions from order manager (primary exchange)
 	positions := orderManager.GetPositions()
 	log.Printf("[STATUS] Active Positions: %d", len(positions))
-
-	for _, pos := range positions {
-		log.Printf("  - %s %s: Entry=$%s, Current PnL=$%s",
-			pos.Symbol, pos.Side,
-			pos.EntryPrice.StringFixed(2),
-			pos.UnrealizedPnL.StringFixed(2))
-	}
 
 	// Get pending orders
 	orders := orderManager.GetOpenOrders()
