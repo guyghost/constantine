@@ -77,12 +77,16 @@ func (c *HTTPClient) createJWT(method, path, host string) (string, error) {
 
 	// Create JWT claims - using full URI as in official example
 	now := time.Now()
+
+	// Construct URI in the format: "GET api.coinbase.com/api/v3/brokerage/accounts"
+	uri := fmt.Sprintf("%s %s%s", method, host, path)
+
 	claims := jwt.MapClaims{
 		"sub": c.apiKey,
 		"iss": "coinbase-cloud",
 		"nbf": now.Unix(),
 		"exp": now.Add(2 * time.Minute).Unix(),
-		"uri": fmt.Sprintf("%s %s%s", method, host, path),
+		"uri": uri,
 	}
 
 	// Create token with ES256 signing method
@@ -126,7 +130,10 @@ func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body an
 
 	// Add JWT authentication if API key is available
 	if c.apiKey != "" && c.privateKeyPEM != "" {
-		jwt, err := c.createJWT(method, path, req.Host)
+		// Extract host from baseURL (e.g., "https://api.coinbase.com/api/v3" -> "api.coinbase.com")
+		// and construct full path including /api/v3 prefix
+		fullPath := "/api/v3" + path
+		jwt, err := c.createJWT(method, fullPath, "api.coinbase.com")
 		if err != nil {
 			return fmt.Errorf("failed to create JWT: %w", err)
 		}
@@ -241,12 +248,16 @@ func (c *Client) IsConnected() bool {
 
 // CoinbaseTickerResponse represents the response from Coinbase ticker API
 type CoinbaseTickerResponse struct {
-	Price  string `json:"price"`
-	Size   string `json:"size"`
-	Time   string `json:"time"`
-	Bid    string `json:"bid"`
-	Ask    string `json:"ask"`
-	Volume string `json:"volume"`
+	Trades []struct {
+		TradeID   string `json:"trade_id"`
+		ProductID string `json:"product_id"`
+		Price     string `json:"price"`
+		Size      string `json:"size"`
+		Time      string `json:"time"`
+		Side      string `json:"side"`
+	} `json:"trades"`
+	BestBid string `json:"best_bid"`
+	BestAsk string `json:"best_ask"`
 }
 
 // GetTicker retrieves ticker data
@@ -257,10 +268,21 @@ func (c *Client) GetTicker(ctx context.Context, symbol string) (*exchanges.Ticke
 		return nil, fmt.Errorf("failed to get ticker: %w", err)
 	}
 
-	bid, _ := decimal.NewFromString(response.Bid)
-	ask, _ := decimal.NewFromString(response.Ask)
-	last, _ := decimal.NewFromString(response.Price)
-	volume, _ := decimal.NewFromString(response.Volume)
+	bid, _ := decimal.NewFromString(response.BestBid)
+	ask, _ := decimal.NewFromString(response.BestAsk)
+
+	// Last price from the most recent trade
+	var last decimal.Decimal
+	if len(response.Trades) > 0 {
+		last, _ = decimal.NewFromString(response.Trades[0].Price)
+	}
+
+	// Calculate 24h volume from recent trades (approximate)
+	var volume decimal.Decimal
+	for _, trade := range response.Trades {
+		size, _ := decimal.NewFromString(trade.Size)
+		volume = volume.Add(size)
+	}
 
 	return &exchanges.Ticker{
 		Symbol:    symbol,
@@ -856,8 +878,14 @@ type CoinbaseAccountsResponse struct {
 		UUID      string `json:"uuid"`
 		Name      string `json:"name"`
 		Currency  string `json:"currency"`
-		Available string `json:"available_balance"`
-		Hold      string `json:"hold"`
+		Available struct {
+			Value    string `json:"value"`
+			Currency string `json:"currency"`
+		} `json:"available_balance"`
+		Hold struct {
+			Value    string `json:"value"`
+			Currency string `json:"currency"`
+		} `json:"hold"`
 	} `json:"accounts"`
 }
 
@@ -872,13 +900,13 @@ func (c *Client) GetBalance(ctx context.Context) ([]exchanges.Balance, error) {
 	balances := make([]exchanges.Balance, 0, len(response.Accounts))
 	for _, account := range response.Accounts {
 		// Parse available balance
-		available, err := decimal.NewFromString(account.Available)
+		available, err := decimal.NewFromString(account.Available.Value)
 		if err != nil {
 			continue // Skip accounts with invalid balance
 		}
 
 		// Parse hold balance
-		hold, err := decimal.NewFromString(account.Hold)
+		hold, err := decimal.NewFromString(account.Hold.Value)
 		if err != nil {
 			continue // Skip accounts with invalid hold
 		}
