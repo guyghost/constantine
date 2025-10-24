@@ -4,10 +4,12 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -17,9 +19,11 @@ import (
 	"github.com/guyghost/constantine/internal/exchanges/dydx"
 	"github.com/guyghost/constantine/internal/exchanges/hyperliquid"
 	"github.com/guyghost/constantine/internal/execution"
+	"github.com/guyghost/constantine/internal/logger"
 	"github.com/guyghost/constantine/internal/order"
 	"github.com/guyghost/constantine/internal/risk"
 	"github.com/guyghost/constantine/internal/strategy"
+	"github.com/guyghost/constantine/internal/telemetry"
 	"github.com/guyghost/constantine/internal/tui"
 	"github.com/joho/godotenv"
 	"github.com/shopspring/decimal"
@@ -99,21 +103,79 @@ func getEnvInt(key string, defaultValue int) int {
 	return defaultValue
 }
 
+func getEnvString(key, defaultValue string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	return value
+}
+
+func loadLoggerConfig() *logger.Config {
+	cfg := logger.DefaultConfig()
+
+	switch strings.ToLower(os.Getenv("LOG_LEVEL")) {
+	case "debug":
+		cfg.Level = slog.LevelDebug
+	case "warn", "warning":
+		cfg.Level = slog.LevelWarn
+	case "error":
+		cfg.Level = slog.LevelError
+	case "info", "":
+		cfg.Level = slog.LevelInfo
+	}
+
+	format := strings.ToLower(os.Getenv("LOG_FORMAT"))
+	if format == "text" {
+		cfg.Format = "text"
+	} else if format == "json" {
+		cfg.Format = "json"
+	}
+
+	cfg.AddSource = getEnvBool("LOG_ADD_SOURCE", false)
+	if output := os.Getenv("LOG_OUTPUT_PATH"); output != "" {
+		cfg.OutputPath = output
+	}
+
+	return cfg
+}
+
 func main() {
 	// Load .env file if it exists
 	godotenv.Load()
 
 	flag.Parse()
 
+	logger.SetDefault(logger.New(loadLoggerConfig()))
+
 	if err := run(); err != nil {
-		log.Fatal(err)
+		logger.Default().Error("bot exited with error", "error", err)
+		os.Exit(1)
 	}
 }
 
 func run() error {
 	// Create context with cancellation
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	var wg sync.WaitGroup
+
+	metricsServer := telemetry.NewServer(getEnvString("TELEMETRY_ADDR", ":9100"))
+	if metricsServer != nil {
+		if err := metricsServer.Start(); err != nil {
+			return fmt.Errorf("failed to start telemetry server: %w", err)
+		}
+		defer func() {
+			metricsServer.SetReady(false)
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer shutdownCancel()
+			_ = metricsServer.Shutdown(shutdownCtx)
+		}()
+	}
+
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
 
 	// Setup signal handling
 	sigChan := make(chan os.Signal, 1)
@@ -139,11 +201,17 @@ func run() error {
 	setupCallbacks(strategyEngine, orderManager, riskManager, executionAgent)
 
 	// Start bot components in background
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		if err := startBotComponents(ctx, strategyEngine, orderManager); err != nil {
-			log.Printf("Error starting bot components: %v", err)
+			botLogger().Error("failed to start bot components", "error", err)
 		}
 	}()
+
+	if metricsServer != nil {
+		metricsServer.SetReady(true)
+	}
 
 	// Run in headless or TUI mode
 	if *headless {
@@ -162,6 +230,10 @@ func run() error {
 	}
 
 	return nil
+}
+
+func botLogger() *logger.Logger {
+	return logger.Default().Component("bot")
 }
 
 // initializeBot initializes all bot components
@@ -186,7 +258,7 @@ func initializeBot() (
 			exchangeConfigs["hyperliquid"].APISecret,
 		)
 		exchangesMap["hyperliquid"] = hyperliquidExchange
-		log.Printf("Hyperliquid exchange enabled")
+		botLogger().Info("exchange enabled", "exchange", "hyperliquid")
 	}
 
 	// Coinbase exchange
@@ -207,7 +279,7 @@ func initializeBot() (
 			)
 		}
 		exchangesMap["coinbase"] = coinbaseExchange
-		log.Printf("Coinbase exchange enabled")
+		botLogger().Info("exchange enabled", "exchange", "coinbase")
 	}
 
 	// dYdX exchange
@@ -226,14 +298,18 @@ func initializeBot() (
 			if err != nil {
 				return nil, nil, nil, nil, nil, fmt.Errorf("failed to create dYdX client with mnemonic: %w", err)
 			}
-			log.Printf("dYdX exchange enabled (mnemonic authentication)")
+			botLogger().Info("exchange enabled", "exchange", "dydx", "auth", "mnemonic")
 		} else if exchangeConfigs["dydx"].APISecret != "" {
 			// Use traditional API key authentication
-			dydxExchange = dydx.NewClient(
+			client, err := dydx.NewClient(
 				exchangeConfigs["dydx"].APIKey,
 				exchangeConfigs["dydx"].APISecret,
 			)
-			log.Printf("dYdX exchange enabled (API key authentication)")
+			if err != nil {
+				return nil, nil, nil, nil, nil, fmt.Errorf("failed to create dYdX client: %w", err)
+			}
+			dydxExchange = client
+			botLogger().Info("exchange enabled", "exchange", "dydx", "auth", "api_key")
 		} else {
 			return nil, nil, nil, nil, nil, fmt.Errorf("dYdX enabled but no authentication method provided - set DYDX_MNEMONIC or DYDX_API_KEY/DYDX_API_SECRET")
 		}
@@ -293,27 +369,37 @@ func setupCallbacks(
 	riskManager *risk.Manager,
 	executionAgent *execution.ExecutionAgent,
 ) {
+	log := botLogger()
+
 	// Strategy signal callback
 	strategyEngine.SetSignalCallback(func(signal *strategy.Signal) {
-		log.Printf("Signal: %s %s for %s at $%s (strength: %.2f)",
-			signal.Type, signal.Side, signal.Symbol,
-			signal.Price.StringFixed(2), signal.Strength)
+		log.Info("strategy signal",
+			"type", signal.Type,
+			"side", signal.Side,
+			"symbol", signal.Symbol,
+			"price", signal.Price.StringFixed(2),
+			"strength", signal.Strength,
+		)
 
 		// Handle signal with execution agent
 		ctx := context.Background()
 		if err := executionAgent.HandleSignal(ctx, signal); err != nil {
-			log.Printf("Execution error: %v", err)
+			log.Error("execution error", "error", err)
 		}
 	})
 
 	// Strategy error callback
 	strategyEngine.SetErrorCallback(func(err error) {
-		log.Printf("Strategy error: %v", err)
+		log.Error("strategy error", "error", err)
 	})
 
 	// Order manager callbacks
 	orderManager.SetOrderUpdateCallback(func(update *order.OrderUpdate) {
-		log.Printf("Order update: %s - %s", update.Order.ID, update.Event)
+		log.Info("order update",
+			"order_id", update.Order.ID,
+			"event", update.Event,
+			"status", update.Order.Status,
+		)
 
 		// Record trade in risk manager if filled
 		if update.Event == order.OrderEventFilled {
@@ -322,13 +408,16 @@ func setupCallbacks(
 	})
 
 	orderManager.SetPositionUpdateCallback(func(position *order.ManagedPosition) {
-		log.Printf("Position update: %s %s - PnL: $%s",
-			position.Symbol, position.Side,
-			position.UnrealizedPnL.StringFixed(2))
+		log.Info("position update",
+			"symbol", position.Symbol,
+			"side", position.Side,
+			"unrealized_pnl", position.UnrealizedPnL.StringFixed(2),
+			"realized_pnl", position.RealizedPnL.StringFixed(2),
+		)
 	})
 
 	orderManager.SetErrorCallback(func(err error) {
-		log.Printf("Order manager error: %v", err)
+		log.Error("order manager error", "error", err)
 	})
 }
 
@@ -348,7 +437,7 @@ func startBotComponents(
 		return fmt.Errorf("failed to start strategy: %w", err)
 	}
 
-	log.Println("Bot components started successfully")
+	botLogger().Info("bot components started")
 
 	// Wait for context cancellation
 	<-ctx.Done()
@@ -357,7 +446,7 @@ func startBotComponents(
 	strategyEngine.Stop()
 	orderManager.Stop()
 
-	log.Println("Bot components stopped")
+	botLogger().Info("bot components stopped")
 
 	return nil
 }
@@ -371,11 +460,12 @@ func runHeadless(
 	riskManager *risk.Manager,
 	executionAgent *execution.ExecutionAgent,
 ) error {
-	log.Println("=== Constantine Trading Bot - Headless Mode ===")
-	log.Printf("Multi-Exchange Mode: Connected to Hyperliquid, Coinbase, dYdX")
-	log.Printf("Strategy: Scalping with EMA/RSI/Bollinger Bands")
-	log.Println("Press Ctrl+C to stop")
-	log.Println("===============================================")
+	log := botLogger()
+	log.Info("headless mode initialized",
+		"exchanges", []string{"hyperliquid", "coinbase", "dydx"},
+		"strategy", "scalping",
+	)
+	log.Info("headless mode awaiting shutdown signal")
 
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
@@ -383,13 +473,13 @@ func runHeadless(
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("Shutting down headless mode...")
+			log.Info("shutting down headless mode")
 			return nil
 
 		case <-ticker.C:
 			// Refresh data from all exchanges
 			if err := aggregator.RefreshData(ctx); err != nil {
-				log.Printf("[STATUS] Failed to refresh data: %v", err)
+				log.Error("headless refresh failed", "error", err)
 			}
 
 			// Log periodic status updates
@@ -405,55 +495,60 @@ func logAggregatedStatus(
 	riskManager *risk.Manager,
 ) {
 	data := aggregator.GetAggregatedData()
+	log := botLogger()
 
-	log.Printf("[STATUS] Total Balance: $%s", data.TotalBalance.StringFixed(2))
-	log.Printf("[STATUS] Total PnL: $%s", data.TotalPnL.StringFixed(2))
+	log.Info("portfolio status",
+		"total_balance", data.TotalBalance.StringFixed(2),
+		"total_pnl", data.TotalPnL.StringFixed(2),
+	)
 
 	// Log each exchange status
 	for name, exchangeData := range data.Exchanges {
-		status := "✓"
-		if !exchangeData.Connected {
-			status = "✗"
-		}
-
-		log.Printf("[STATUS] %s %s: Connected=%v", status, name, exchangeData.Connected)
+		entry := log.Component("exchange").WithField("exchange", name)
+		entry.Info("exchange status", "connected", exchangeData.Connected)
 
 		if exchangeData.Error != nil {
-			log.Printf("  - Error: %v", exchangeData.Error)
+			entry.Warn("exchange error", "error", exchangeData.Error)
 		}
 
 		// Log balances
 		for _, balance := range exchangeData.Balances {
 			if balance.Total.GreaterThan(decimal.Zero) {
-				log.Printf("  - Balance: %s $%s", balance.Asset, balance.Total.StringFixed(2))
+				entry.Info("balance snapshot",
+					"asset", balance.Asset,
+					"total", balance.Total.StringFixed(2),
+				)
 			}
 		}
 
 		// Log positions
 		for _, position := range exchangeData.Positions {
-			log.Printf("  - Position: %s %s @ $%s, PnL: $%s",
-				position.Symbol, position.Side,
-				position.EntryPrice.StringFixed(2),
-				position.UnrealizedPnL.StringFixed(2))
+			entry.Info("position snapshot",
+				"symbol", position.Symbol,
+				"side", position.Side,
+				"entry_price", position.EntryPrice.StringFixed(2),
+				"unrealized_pnl", position.UnrealizedPnL.StringFixed(2),
+			)
 		}
 	}
 
 	// Get positions from order manager (primary exchange)
 	positions := orderManager.GetPositions()
-	log.Printf("[STATUS] Active Positions: %d", len(positions))
 
 	// Get pending orders
 	orders := orderManager.GetOpenOrders()
-	log.Printf("[STATUS] Pending Orders: %d", len(orders))
 
 	// Risk stats
 	currentBalance := riskManager.GetCurrentBalance()
 	canTrade, reason := riskManager.CanTrade()
-	log.Printf("[STATUS] Current Balance: $%s", currentBalance.StringFixed(2))
-	log.Printf("[STATUS] Can Trade: %v", canTrade)
-	if !canTrade {
-		log.Printf("[STATUS] Trading blocked: %s", reason)
+	fields := []any{
+		"active_positions", len(positions),
+		"pending_orders", len(orders),
+		"current_balance", currentBalance.StringFixed(2),
+		"can_trade", canTrade,
 	}
-
-	log.Println("-----------------------------------------------")
+	if !canTrade {
+		fields = append(fields, "blocked_reason", reason)
+	}
+	log.Info("risk status", fields...)
 }

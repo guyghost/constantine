@@ -177,8 +177,11 @@ func (sg *SignalGenerator) calculateSignalStrength(
 
 	// EMA divergence strength (max 0.4)
 	emaDiff := shortEMA.Sub(longEMA).Abs()
-	emaDivergence := emaDiff.Div(longEMA)
-	emaStrength, _ := emaDivergence.Mul(decimal.NewFromInt(100)).Float64()
+	emaStrength := 0.0
+	if !longEMA.IsZero() {
+		emaDivergence := emaDiff.Div(longEMA)
+		emaStrength, _ = emaDivergence.Mul(decimal.NewFromInt(100)).Float64()
+	}
 	if emaStrength > 0.4 {
 		emaStrength = 0.4
 	}

@@ -2,17 +2,22 @@ package order
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/guyghost/constantine/internal/exchanges"
+	ordererrors "github.com/guyghost/constantine/internal/order/errors"
+	"github.com/guyghost/constantine/internal/telemetry"
 	"github.com/shopspring/decimal"
 )
 
 const (
 	// MaxFilledOrdersHistory limits the number of filled orders kept in memory
 	MaxFilledOrdersHistory = 1000
+
+	defaultAPICallTimeout = 5 * time.Second
 )
 
 // Manager manages orders and positions
@@ -68,11 +73,21 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.mu.Unlock()
 		return fmt.Errorf("order manager already running")
 	}
+	if m.done == nil {
+		m.done = make(chan struct{})
+	} else {
+		select {
+		case <-m.done:
+			m.done = make(chan struct{})
+		default:
+		}
+	}
+	doneCh := m.done
 	m.running = true
 	m.mu.Unlock()
 
 	// Start monitoring loop
-	go m.monitor(ctx)
+	go m.monitor(ctx, doneCh)
 
 	return nil
 }
@@ -86,13 +101,27 @@ func (m *Manager) Stop() error {
 		return nil
 	}
 
-	close(m.done)
+	if m.done != nil {
+		select {
+		case <-m.done:
+		default:
+			close(m.done)
+		}
+		m.done = nil
+	}
 	m.running = false
 	return nil
 }
 
 // PlaceOrder places a new order
 func (m *Manager) PlaceOrder(ctx context.Context, req *OrderRequest) (*exchanges.Order, error) {
+	if err := validateOrderRequest(req); err != nil {
+		return nil, err
+	}
+
+	callCtx, cancel := context.WithTimeout(ctx, defaultAPICallTimeout)
+	defer cancel()
+
 	// Create order
 	order := &exchanges.Order{
 		ClientOrderID: fmt.Sprintf("order-%d", time.Now().UnixNano()),
@@ -104,9 +133,9 @@ func (m *Manager) PlaceOrder(ctx context.Context, req *OrderRequest) (*exchanges
 	}
 
 	// Place order on exchange
-	placedOrder, err := m.exchange.PlaceOrder(ctx, order)
+	placedOrder, err := m.exchange.PlaceOrder(callCtx, order)
 	if err != nil {
-		m.emitError(fmt.Errorf("failed to place order: %w", err))
+		m.emitError(ordererrors.New(ordererrors.OperationPlace, order.Symbol, err))
 		return nil, err
 	}
 
@@ -124,19 +153,29 @@ func (m *Manager) PlaceOrder(ctx context.Context, req *OrderRequest) (*exchanges
 
 	// Place stop loss and take profit if specified
 	if !req.StopLoss.IsZero() {
-		m.placeStopLoss(ctx, placedOrder, req.StopLoss)
+		if _, err := m.placeStopLoss(ctx, placedOrder, req.StopLoss); err != nil {
+			_ = m.CancelOrder(context.WithoutCancel(ctx), placedOrder.ID)
+			return nil, ordererrors.New(ordererrors.OperationPlaceStopLoss, placedOrder.Symbol, err)
+		}
 	}
 	if !req.TakeProfit.IsZero() {
-		m.placeTakeProfit(ctx, placedOrder, req.TakeProfit)
+		if _, err := m.placeTakeProfit(ctx, placedOrder, req.TakeProfit); err != nil {
+			_ = m.CancelOrder(context.WithoutCancel(ctx), placedOrder.ID)
+			return nil, ordererrors.New(ordererrors.OperationPlaceTakeProfit, placedOrder.Symbol, err)
+		}
 	}
 
+	telemetry.RecordOrderPlaced(req.Symbol, string(req.Side))
 	return placedOrder, nil
 }
 
 // CancelOrder cancels an existing order
 func (m *Manager) CancelOrder(ctx context.Context, orderID string) error {
-	if err := m.exchange.CancelOrder(ctx, orderID); err != nil {
-		m.emitError(fmt.Errorf("failed to cancel order: %w", err))
+	callCtx, cancel := context.WithTimeout(ctx, defaultAPICallTimeout)
+	defer cancel()
+
+	if err := m.exchange.CancelOrder(callCtx, orderID); err != nil {
+		m.emitError(ordererrors.New(ordererrors.OperationCancel, orderID, err))
 		return err
 	}
 
@@ -241,7 +280,7 @@ func (m *Manager) ClosePosition(ctx context.Context, symbol string) error {
 }
 
 // monitor monitors orders and positions
-func (m *Manager) monitor(ctx context.Context) {
+func (m *Manager) monitor(ctx context.Context, done <-chan struct{}) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
@@ -249,7 +288,7 @@ func (m *Manager) monitor(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-m.done:
+		case <-done:
 			return
 		case <-ticker.C:
 			m.updateOrders(ctx)
@@ -268,7 +307,9 @@ func (m *Manager) updateOrders(ctx context.Context) {
 	m.mu.RUnlock()
 
 	for _, orderID := range orderIDs {
-		order, err := m.exchange.GetOrder(ctx, orderID)
+		callCtx, cancel := context.WithTimeout(ctx, defaultAPICallTimeout)
+		order, err := m.exchange.GetOrder(callCtx, orderID)
+		cancel()
 		if err != nil {
 			continue
 		}
@@ -310,7 +351,7 @@ func (m *Manager) handleOrderStatusChange(newOrder, oldOrder *exchanges.Order) {
 	}
 
 	// Emit order update
-	go m.emitOrderUpdate(&OrderUpdate{
+	m.emitOrderUpdate(&OrderUpdate{
 		Order:     newOrder,
 		Event:     event,
 		Timestamp: time.Now(),
@@ -346,7 +387,7 @@ func (m *Manager) handleFilledOrder(order *exchanges.Order) {
 		}
 
 		m.orderBook.Positions[order.Symbol] = position
-		go m.emitPositionUpdate(position)
+		m.emitPositionUpdate(position)
 	} else {
 		// Update existing position or close it
 		if (position.Side == PositionSideLong && order.Side == exchanges.OrderSideSell) ||
@@ -360,7 +401,7 @@ func (m *Manager) handleFilledOrder(order *exchanges.Order) {
 			position.ExitOrderID = order.ID
 
 			delete(m.orderBook.Positions, order.Symbol)
-			go m.emitPositionUpdate(position)
+			m.emitPositionUpdate(position)
 		}
 	}
 }
@@ -371,12 +412,19 @@ func (m *Manager) calculatePnL(position *ManagedPosition, exitPrice decimal.Deci
 	if position.Side == PositionSideShort {
 		priceDiff = priceDiff.Neg()
 	}
-	return priceDiff.Mul(position.Amount)
+	leverage := position.Leverage
+	if leverage.IsZero() {
+		leverage = decimal.NewFromInt(1)
+	}
+	return priceDiff.Mul(position.Amount).Mul(leverage)
 }
 
 // updatePositions updates position information
 func (m *Manager) updatePositions(ctx context.Context) {
-	positions, err := m.exchange.GetPositions(ctx)
+	callCtx, cancel := context.WithTimeout(ctx, defaultAPICallTimeout)
+	defer cancel()
+
+	positions, err := m.exchange.GetPositions(callCtx)
 	if err != nil {
 		return
 	}
@@ -393,10 +441,17 @@ func (m *Manager) updatePositions(ctx context.Context) {
 }
 
 // placeStopLoss places a stop loss order
-func (m *Manager) placeStopLoss(ctx context.Context, order *exchanges.Order, stopLoss decimal.Decimal) {
+func (m *Manager) placeStopLoss(ctx context.Context, order *exchanges.Order, stopLoss decimal.Decimal) (*exchanges.Order, error) {
 	if stopLoss.IsZero() {
-		return
+		return nil, nil
 	}
+
+	if stopLoss.LessThanOrEqual(decimal.Zero) {
+		return nil, errors.New("stop loss price must be positive")
+	}
+
+	callCtx, cancel := context.WithTimeout(ctx, defaultAPICallTimeout)
+	defer cancel()
 
 	// Determine stop loss side (opposite of entry order)
 	stopSide := exchanges.OrderSideSell
@@ -410,18 +465,18 @@ func (m *Manager) placeStopLoss(ctx context.Context, order *exchanges.Order, sto
 		Side:      stopSide,
 		Type:      exchanges.OrderTypeStopLimit,
 		Amount:    order.Amount,
-		Price:     stopLoss,      // Limit price for stop loss
-		StopPrice: stopLoss,      // Trigger price
+		Price:     stopLoss,
+		StopPrice: stopLoss,
 		Status:    exchanges.OrderStatusOpen,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
 
 	// Place the stop loss order
-	placedOrder, err := m.exchange.PlaceOrder(ctx, stopOrder)
+	placedOrder, err := m.exchange.PlaceOrder(callCtx, stopOrder)
 	if err != nil {
-		m.emitError(fmt.Errorf("failed to place stop loss order: %w", err))
-		return
+		m.emitError(ordererrors.New(ordererrors.OperationPlaceStopLoss, order.Symbol, err))
+		return nil, err
 	}
 
 	// Update order book
@@ -443,13 +498,23 @@ func (m *Manager) placeStopLoss(ctx context.Context, order *exchanges.Order, sto
 		Event:     OrderEventCreated,
 		Timestamp: time.Now(),
 	})
+
+	telemetry.RecordStopLossPlaced(order.Symbol)
+	return placedOrder, nil
 }
 
 // placeTakeProfit places a take profit order
-func (m *Manager) placeTakeProfit(ctx context.Context, order *exchanges.Order, takeProfit decimal.Decimal) {
+func (m *Manager) placeTakeProfit(ctx context.Context, order *exchanges.Order, takeProfit decimal.Decimal) (*exchanges.Order, error) {
 	if takeProfit.IsZero() {
-		return
+		return nil, nil
 	}
+
+	if takeProfit.LessThanOrEqual(decimal.Zero) {
+		return nil, errors.New("take profit price must be positive")
+	}
+
+	callCtx, cancel := context.WithTimeout(ctx, defaultAPICallTimeout)
+	defer cancel()
 
 	// Determine take profit side (opposite of entry order)
 	takeProfitSide := exchanges.OrderSideSell
@@ -470,10 +535,10 @@ func (m *Manager) placeTakeProfit(ctx context.Context, order *exchanges.Order, t
 	}
 
 	// Place the take profit order
-	placedOrder, err := m.exchange.PlaceOrder(ctx, takeProfitOrder)
+	placedOrder, err := m.exchange.PlaceOrder(callCtx, takeProfitOrder)
 	if err != nil {
-		m.emitError(fmt.Errorf("failed to place take profit order: %w", err))
-		return
+		m.emitError(ordererrors.New(ordererrors.OperationPlaceTakeProfit, order.Symbol, err))
+		return nil, err
 	}
 
 	// Update order book
@@ -495,14 +560,17 @@ func (m *Manager) placeTakeProfit(ctx context.Context, order *exchanges.Order, t
 		Event:     OrderEventCreated,
 		Timestamp: time.Now(),
 	})
+
+	telemetry.RecordTakeProfitPlaced(order.Symbol)
+	return placedOrder, nil
 }
 
 // addFilledOrder adds an order to the filled orders list with size limit
 func (m *Manager) addFilledOrder(order *exchanges.Order) {
-	// Limit the size of filled orders to prevent memory leak
 	if len(m.orderBook.FilledOrders) >= MaxFilledOrdersHistory {
-		// Remove oldest orders (keep last MaxFilledOrdersHistory-1 orders)
-		m.orderBook.FilledOrders = m.orderBook.FilledOrders[1:]
+		trimmed := make([]*exchanges.Order, MaxFilledOrdersHistory-1)
+		copy(trimmed, m.orderBook.FilledOrders[len(m.orderBook.FilledOrders)-(MaxFilledOrdersHistory-1):])
+		m.orderBook.FilledOrders = trimmed
 	}
 	m.orderBook.FilledOrders = append(m.orderBook.FilledOrders, order)
 }
@@ -514,7 +582,7 @@ func (m *Manager) emitOrderUpdate(update *OrderUpdate) {
 	m.mu.RUnlock()
 
 	if callback != nil {
-		callback(update)
+		safeInvoke(func() { callback(update) })
 	}
 }
 
@@ -525,7 +593,7 @@ func (m *Manager) emitPositionUpdate(position *ManagedPosition) {
 	m.mu.RUnlock()
 
 	if callback != nil {
-		callback(position)
+		safeInvoke(func() { callback(position) })
 	}
 }
 
@@ -536,8 +604,36 @@ func (m *Manager) emitError(err error) {
 	m.mu.RUnlock()
 
 	if callback != nil {
-		callback(err)
+		safeInvoke(func() { callback(err) })
 	}
+}
+
+func safeInvoke(fn func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			telemetry.RecordCallbackPanic()
+		}
+	}()
+	fn()
+}
+
+func validateOrderRequest(req *OrderRequest) error {
+	if req == nil {
+		return ordererrors.New(ordererrors.OperationValidate, "", errors.New("order request is nil"))
+	}
+	if req.Symbol == "" {
+		return ordererrors.New(ordererrors.OperationValidate, "", errors.New("symbol is required"))
+	}
+	if req.Amount.LessThanOrEqual(decimal.Zero) {
+		return ordererrors.New(ordererrors.OperationValidate, req.Symbol, errors.New("amount must be positive"))
+	}
+	switch req.Type {
+	case exchanges.OrderTypeLimit, exchanges.OrderTypeStopLimit:
+		if req.Price.LessThanOrEqual(decimal.Zero) {
+			return ordererrors.New(ordererrors.OperationValidate, req.Symbol, errors.New("price must be positive for limit orders"))
+		}
+	}
+	return nil
 }
 
 // GetStats returns order statistics

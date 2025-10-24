@@ -3,19 +3,19 @@ module github.com/guyghost/constantine
 go 1.24.0
 
 require (
-	github.com/btcsuite/btcd v0.24.2
-	github.com/btcsuite/btcd/btcutil v1.1.6
-	github.com/charmbracelet/bubbletea v1.3.10
-	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/cosmos/cosmos-sdk v0.53.4
-	github.com/golang-jwt/jwt/v5 v5.3.0
-	github.com/google/uuid v1.6.0
-	github.com/gorilla/websocket v1.5.3
-	github.com/joho/godotenv v1.5.1
-	github.com/shopspring/decimal v1.4.0
-	github.com/stretchr/testify v1.10.0
-	github.com/tyler-smith/go-bip39 v1.1.0
-	golang.org/x/crypto v0.43.0
+        github.com/btcsuite/btcd v0.24.2
+        github.com/btcsuite/btcd/btcutil v1.1.6
+        github.com/charmbracelet/bubbletea v1.3.10
+        github.com/charmbracelet/lipgloss v1.1.0
+        github.com/cosmos/cosmos-sdk v0.53.4
+        github.com/golang-jwt/jwt/v5 v5.3.0
+        github.com/google/uuid v1.6.0
+        github.com/gorilla/websocket v1.5.3
+        github.com/joho/godotenv v1.5.1
+        github.com/shopspring/decimal v1.4.0
+        github.com/stretchr/testify v1.10.0
+        github.com/tyler-smith/go-bip39 v1.1.0
+        golang.org/x/crypto v0.43.0
 )
 
 require (

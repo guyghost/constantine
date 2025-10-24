@@ -32,16 +32,23 @@ type Client struct {
 
 // NewClient creates a new dYdX client
 // For dYdX, use apiSecret as the mnemonic phrase
-func NewClient(apiKey, apiSecret string) *Client {
+func NewClient(apiKey, apiSecret string) (*Client, error) {
 	c := &Client{
 		apiKey:    apiKey,
 		apiSecret: apiSecret,
-		mnemonic:  apiSecret, // apiSecret is the mnemonic for dYdX
 		baseURL:   dydxAPIURL,
 		wsURL:     dydxWSURL,
 	}
+
+	if apiSecret != "" {
+		if err := ValidateMnemonic(apiSecret); err != nil {
+			return nil, fmt.Errorf("invalid mnemonic: %w", err)
+		}
+		c.mnemonic = apiSecret
+	}
+
 	c.httpClient = NewHTTPClient(c.baseURL, apiKey, "")
-	return c
+	return c, nil
 }
 
 // NewClientWithMnemonic creates a new dYdX client with explicit mnemonic
@@ -86,7 +93,10 @@ func (c *Client) Connect(ctx context.Context) error {
 	}
 
 	// Initialize wallet from mnemonic if provided and not already initialized
-	if c.wallet == nil && c.mnemonic != "" && ValidateMnemonic(c.mnemonic) == nil {
+	if c.wallet == nil && c.mnemonic != "" {
+		if err := ValidateMnemonic(c.mnemonic); err != nil {
+			return fmt.Errorf("invalid mnemonic: %w", err)
+		}
 		wallet, err := NewWalletFromMnemonic(c.mnemonic, 0)
 		if err != nil {
 			return fmt.Errorf("failed to initialize wallet: %w", err)

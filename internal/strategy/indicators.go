@@ -8,7 +8,7 @@ import (
 
 // EMA calculates the Exponential Moving Average
 func EMA(prices []decimal.Decimal, period int) []decimal.Decimal {
-	if len(prices) < period {
+	if period <= 0 || len(prices) < period {
 		return []decimal.Decimal{}
 	}
 
@@ -33,7 +33,7 @@ func EMA(prices []decimal.Decimal, period int) []decimal.Decimal {
 
 // SMA calculates the Simple Moving Average
 func SMA(prices []decimal.Decimal, period int) []decimal.Decimal {
-	if len(prices) < period {
+	if period <= 0 || len(prices) < period {
 		return []decimal.Decimal{}
 	}
 
@@ -52,7 +52,7 @@ func SMA(prices []decimal.Decimal, period int) []decimal.Decimal {
 
 // RSI calculates the Relative Strength Index
 func RSI(prices []decimal.Decimal, period int) []decimal.Decimal {
-	if len(prices) < period+1 {
+	if period <= 0 || len(prices) < period+1 {
 		return []decimal.Decimal{}
 	}
 
@@ -71,30 +71,27 @@ func RSI(prices []decimal.Decimal, period int) []decimal.Decimal {
 		}
 	}
 
-	result := make([]decimal.Decimal, len(prices)-period)
+	gainEMA := EMA(gains, period)
+	lossEMA := EMA(losses, period)
 
-	// Calculate initial average gain and loss
-	avgGain := decimal.Zero
-	avgLoss := decimal.Zero
-	for i := 0; i < period; i++ {
-		avgGain = avgGain.Add(gains[i])
-		avgLoss = avgLoss.Add(losses[i])
+	length := len(gainEMA)
+	if len(lossEMA) < length {
+		length = len(lossEMA)
 	}
-	avgGain = avgGain.Div(decimal.NewFromInt(int64(period)))
-	avgLoss = avgLoss.Div(decimal.NewFromInt(int64(period)))
+	if length == 0 {
+		return []decimal.Decimal{}
+	}
 
-	// Calculate RSI
-	for i := period; i < len(gains); i++ {
-		avgGain = avgGain.Mul(decimal.NewFromInt(int64(period - 1))).Add(gains[i]).Div(decimal.NewFromInt(int64(period)))
-		avgLoss = avgLoss.Mul(decimal.NewFromInt(int64(period - 1))).Add(losses[i]).Div(decimal.NewFromInt(int64(period)))
-
-		if avgLoss.IsZero() {
-			result[i-period] = decimal.NewFromInt(100)
-		} else {
-			rs := avgGain.Div(avgLoss)
-			rsi := decimal.NewFromInt(100).Sub(decimal.NewFromInt(100).Div(decimal.NewFromInt(1).Add(rs)))
-			result[i-period] = rsi
+	result := make([]decimal.Decimal, length)
+	for i := 0; i < length; i++ {
+		loss := lossEMA[i]
+		if loss.IsZero() {
+			result[i] = decimal.NewFromInt(100)
+			continue
 		}
+		rs := gainEMA[i].Div(loss)
+		rsi := decimal.NewFromInt(100).Sub(decimal.NewFromInt(100).Div(decimal.NewFromInt(1).Add(rs)))
+		result[i] = rsi
 	}
 
 	return result
@@ -102,7 +99,7 @@ func RSI(prices []decimal.Decimal, period int) []decimal.Decimal {
 
 // MACD calculates the Moving Average Convergence Divergence
 func MACD(prices []decimal.Decimal, fastPeriod, slowPeriod, signalPeriod int) (macd, signal, histogram []decimal.Decimal) {
-	if len(prices) < slowPeriod {
+	if fastPeriod <= 0 || slowPeriod <= 0 || signalPeriod <= 0 || len(prices) < slowPeriod {
 		return []decimal.Decimal{}, []decimal.Decimal{}, []decimal.Decimal{}
 	}
 
@@ -137,7 +134,7 @@ func MACD(prices []decimal.Decimal, fastPeriod, slowPeriod, signalPeriod int) (m
 
 // BollingerBands calculates Bollinger Bands
 func BollingerBands(prices []decimal.Decimal, period int, stdDev float64) (upper, middle, lower []decimal.Decimal) {
-	if len(prices) < period {
+	if period <= 0 || len(prices) < period {
 		return []decimal.Decimal{}, []decimal.Decimal{}, []decimal.Decimal{}
 	}
 
@@ -164,7 +161,7 @@ func BollingerBands(prices []decimal.Decimal, period int, stdDev float64) (upper
 
 // ATR calculates the Average True Range
 func ATR(high, low, close []decimal.Decimal, period int) []decimal.Decimal {
-	if len(high) < period+1 || len(low) < period+1 || len(close) < period+1 {
+	if period <= 0 || len(high) < period+1 || len(low) < period+1 || len(close) < period+1 {
 		return []decimal.Decimal{}
 	}
 
@@ -212,7 +209,7 @@ func VWAP(prices, volumes []decimal.Decimal) decimal.Decimal {
 
 // Stochastic calculates the Stochastic Oscillator
 func Stochastic(high, low, close []decimal.Decimal, period int) []decimal.Decimal {
-	if len(high) < period || len(low) < period || len(close) < period {
+	if period <= 0 || len(high) < period || len(low) < period || len(close) < period {
 		return []decimal.Decimal{}
 	}
 
