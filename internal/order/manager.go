@@ -10,6 +10,11 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+const (
+	// MaxFilledOrdersHistory limits the number of filled orders kept in memory
+	MaxFilledOrdersHistory = 1000
+)
+
 // Manager manages orders and positions
 type Manager struct {
 	exchange  exchanges.Exchange
@@ -140,7 +145,7 @@ func (m *Manager) CancelOrder(ctx context.Context, orderID string) error {
 	if order, exists := m.orderBook.OpenOrders[orderID]; exists {
 		order.Status = exchanges.OrderStatusCanceled
 		delete(m.orderBook.OpenOrders, orderID)
-		m.orderBook.FilledOrders = append(m.orderBook.FilledOrders, order)
+		m.addFilledOrder(order)
 	}
 	m.mu.Unlock()
 
@@ -290,7 +295,7 @@ func (m *Manager) handleOrderStatusChange(newOrder, oldOrder *exchanges.Order) {
 	case exchanges.OrderStatusFilled:
 		event = OrderEventFilled
 		delete(m.orderBook.OpenOrders, newOrder.ID)
-		m.orderBook.FilledOrders = append(m.orderBook.FilledOrders, newOrder)
+		m.addFilledOrder(newOrder)
 
 		// Update or create position
 		m.handleFilledOrder(newOrder)
@@ -395,6 +400,16 @@ func (m *Manager) placeStopLoss(ctx context.Context, order *exchanges.Order, sto
 // placeTakeProfit places a take profit order
 func (m *Manager) placeTakeProfit(ctx context.Context, order *exchanges.Order, takeProfit decimal.Decimal) {
 	// TODO: Implement take profit order placement
+}
+
+// addFilledOrder adds an order to the filled orders list with size limit
+func (m *Manager) addFilledOrder(order *exchanges.Order) {
+	// Limit the size of filled orders to prevent memory leak
+	if len(m.orderBook.FilledOrders) >= MaxFilledOrdersHistory {
+		// Remove oldest orders (keep last MaxFilledOrdersHistory-1 orders)
+		m.orderBook.FilledOrders = m.orderBook.FilledOrders[1:]
+	}
+	m.orderBook.FilledOrders = append(m.orderBook.FilledOrders, order)
 }
 
 // emitOrderUpdate emits an order update

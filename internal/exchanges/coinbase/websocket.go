@@ -74,6 +74,11 @@ func (ws *WebSocketClient) handleMessages() {
 		}
 	}()
 
+	backoff := time.Second
+	maxBackoff := time.Minute
+	const maxRetries = 10
+	retries := 0
+
 	for {
 		select {
 		case <-ws.done:
@@ -81,14 +86,35 @@ func (ws *WebSocketClient) handleMessages() {
 		default:
 			_, message, err := ws.conn.ReadMessage()
 			if err != nil {
-				// Log error and attempt reconnect
-				time.Sleep(5 * time.Second)
-				continue
+				retries++
+				if retries >= maxRetries {
+					// Max retries exceeded, exit
+					return
+				}
+
+				// Exponential backoff with context check
+				select {
+				case <-ws.done:
+					return
+				case <-time.After(backoff):
+					backoff = min(backoff*2, maxBackoff)
+					continue
+				}
 			}
 
+			// Reset backoff on successful read
+			backoff = time.Second
+			retries = 0
 			ws.processMessage(message)
 		}
 	}
+}
+
+func min(a, b time.Duration) time.Duration {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // processMessage processes a single message
@@ -116,9 +142,6 @@ func (ws *WebSocketClient) processMessage(message []byte) {
 
 // handleTickerMessage handles ticker updates
 func (ws *WebSocketClient) handleTickerMessage(msg map[string]any) {
-	ws.mu.RLock()
-	defer ws.mu.RUnlock()
-
 	events, ok := msg["events"].([]interface{})
 	if !ok || len(events) == 0 {
 		return
@@ -134,7 +157,12 @@ func (ws *WebSocketClient) handleTickerMessage(msg map[string]any) {
 		return
 	}
 
-	if callback, exists := ws.tickerCallbacks[symbol]; exists {
+	// Get callback outside the data parsing
+	ws.mu.RLock()
+	callback, exists := ws.tickerCallbacks[symbol]
+	ws.mu.RUnlock()
+
+	if exists {
 		// Parse ticker data
 		var bid, ask, last decimal.Decimal
 		var volume24h decimal.Decimal
@@ -160,15 +188,14 @@ func (ws *WebSocketClient) handleTickerMessage(msg map[string]any) {
 			Volume24h: volume24h,
 			Timestamp: time.Now(),
 		}
+
+		// Execute callback outside the lock
 		callback(ticker)
 	}
 }
 
 // handleOrderBookMessage handles order book updates
 func (ws *WebSocketClient) handleOrderBookMessage(msg map[string]any) {
-	ws.mu.RLock()
-	defer ws.mu.RUnlock()
-
 	events, ok := msg["events"].([]interface{})
 	if !ok || len(events) == 0 {
 		return
@@ -184,7 +211,12 @@ func (ws *WebSocketClient) handleOrderBookMessage(msg map[string]any) {
 		return
 	}
 
-	if callback, exists := ws.orderbookCallbacks[symbol]; exists {
+	// Get callback outside the data parsing
+	ws.mu.RLock()
+	callback, exists := ws.orderbookCallbacks[symbol]
+	ws.mu.RUnlock()
+
+	if exists {
 		// Parse order book data
 		var bids, asks []exchanges.Level
 
@@ -222,15 +254,14 @@ func (ws *WebSocketClient) handleOrderBookMessage(msg map[string]any) {
 			Asks:      asks,
 			Timestamp: time.Now(),
 		}
+
+		// Execute callback outside the lock
 		callback(orderbook)
 	}
 }
 
 // handleTradeMessage handles trade updates
 func (ws *WebSocketClient) handleTradeMessage(msg map[string]any) {
-	ws.mu.RLock()
-	defer ws.mu.RUnlock()
-
 	events, ok := msg["events"].([]interface{})
 	if !ok || len(events) == 0 {
 		return
@@ -246,7 +277,12 @@ func (ws *WebSocketClient) handleTradeMessage(msg map[string]any) {
 		return
 	}
 
-	if callback, exists := ws.tradeCallbacks[symbol]; exists {
+	// Get callback outside the data parsing
+	ws.mu.RLock()
+	callback, exists := ws.tradeCallbacks[symbol]
+	ws.mu.RUnlock()
+
+	if exists {
 		// Parse trade data
 		var price, size decimal.Decimal
 		var side exchanges.OrderSide
@@ -272,6 +308,8 @@ func (ws *WebSocketClient) handleTradeMessage(msg map[string]any) {
 			Amount:    size,
 			Timestamp: time.Now(),
 		}
+
+		// Execute callback outside the lock
 		callback(trade)
 	}
 }

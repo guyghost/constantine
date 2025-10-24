@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -426,14 +427,10 @@ func (c *Client) GetCandles(ctx context.Context, symbol string, interval string,
 		})
 	}
 
-	// Sort by timestamp (oldest first)
-	for i := 0; i < len(candles)-1; i++ {
-		for j := i + 1; j < len(candles); j++ {
-			if candles[i].Timestamp.After(candles[j].Timestamp) {
-				candles[i], candles[j] = candles[j], candles[i]
-			}
-		}
-	}
+	// Sort by timestamp (oldest first) using efficient sort
+	sort.Slice(candles, func(i, j int) bool {
+		return candles[i].Timestamp.Before(candles[j].Timestamp)
+	})
 
 	return candles, nil
 }

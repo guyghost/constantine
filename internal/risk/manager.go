@@ -302,7 +302,11 @@ func (m *Manager) GetDrawdown() decimal.Decimal {
 // checkDailyReset checks if daily statistics should be reset
 func (m *Manager) checkDailyReset() {
 	now := time.Now()
-	if now.Day() != m.lastResetDate.Day() {
+	// Truncate to day boundaries for accurate comparison
+	lastResetDay := m.lastResetDate.Truncate(24 * time.Hour)
+	currentDay := now.Truncate(24 * time.Hour)
+
+	if currentDay.After(lastResetDay) {
 		m.dailyPnL = decimal.Zero
 		m.tradesExecutedToday = 0
 		m.lastResetDate = now

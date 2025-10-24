@@ -102,8 +102,6 @@ func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body an
 			return fmt.Errorf("failed to create JWT: %w", err)
 		}
 
-		// Debug logging
-		fmt.Printf("DEBUG Coinbase JWT: %s\n", jwt)
 
 		req.Header.Set("Authorization", "Bearer "+jwt)
 	}
@@ -222,15 +220,7 @@ func (c *Client) GetTicker(ctx context.Context, symbol string) (*exchanges.Ticke
 	var response CoinbaseTickerResponse
 	err := c.httpClient.doRequest(ctx, "GET", "/brokerage/products/"+symbol+"/ticker", nil, &response)
 	if err != nil {
-		// Fallback to mock data on error
-		return &exchanges.Ticker{
-			Symbol:    symbol,
-			Bid:       decimal.NewFromFloat(50000),
-			Ask:       decimal.NewFromFloat(50001),
-			Last:      decimal.NewFromFloat(50000.5),
-			Volume24h: decimal.NewFromFloat(1000000),
-			Timestamp: time.Now(),
-		}, nil
+		return nil, fmt.Errorf("failed to get ticker: %w", err)
 	}
 
 	bid, _ := decimal.NewFromString(response.Bid)
