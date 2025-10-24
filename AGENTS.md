@@ -205,8 +205,8 @@ TUI Agent:
 1. Exchange Agent receives new candle data
 2. Strategy Agent analyzes candles with indicators
 3. Signal generated (BUY/SELL) with confidence score
-4. TUI Agent displays signal to user
-5. (Future) Execution Agent places order automatically
+4. Execution Agent validates signal and risk parameters
+5. Execution Agent places order automatically
 6. Position tracked across all exchanges
 7. TUI updates with new position and PnL
 ```
@@ -226,7 +226,29 @@ TUI Agent:
 4. Configure risk management parameters
 5. Integrate with TUI for signal display
 
-### 4. Backtesting Agent (`internal/backtesting/`)
+### 5. Execution Agent (`internal/execution/execution.go`)
+
+The execution agent handles automated order placement based on trading signals.
+
+**Responsibilities**:
+- Process trading signals from the strategy agent
+- Validate orders with risk management rules
+- Place market/limit orders on exchanges
+- Manage stop-loss and take-profit levels
+- Handle position closing on exit signals
+
+**Key Methods**:
+- `HandleSignal()` - Processes entry/exit signals and executes orders
+- `handleEntrySignal()` - Places orders for entry signals with risk management
+- `handleExitSignal()` - Closes positions for exit signals
+- `calculateStopLoss()` - Computes stop-loss prices based on position side
+- `calculateTakeProfit()` - Computes take-profit prices based on position side
+
+**Configuration**:
+- Stop loss percentage (default: 0.5%)
+- Take profit percentage (default: 1%)
+- Minimum signal strength threshold (default: 0.5)
+- Auto-execution toggle
 
 The backtesting agent validates trading strategies against historical data.
 
@@ -293,7 +315,7 @@ The backtesting agent validates trading strategies against historical data.
 
 ### Future Agent Opportunities
 - **Risk Manager Agent**: Portfolio-level risk monitoring ✓ (Implemented in internal/risk/)
-- **Execution Agent**: Automated order placement based on signals
+- **Execution Agent**: Automated order placement based on signals ✓ (Implemented in internal/execution/)
 - **Backtesting Agent**: Historical strategy validation ✓ (Implemented)
 - **Alert Agent**: Notification system for critical events
 - **Analytics Agent**: Performance metrics and reporting
@@ -306,6 +328,7 @@ The backtesting agent validates trading strategies against historical data.
 4. **State Management**: TUI agent centralizes application state
 5. **Modularity**: Easy to add/remove exchange agents without breaking system
 6. **Testing**: Interface-based design enables easy mocking for tests
+7. **TDD Approach**: Development follows Test-Driven Development principles with comprehensive test coverage for all new features
 
 ## Configuration
 

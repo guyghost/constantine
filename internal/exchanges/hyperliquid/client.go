@@ -3,10 +3,14 @@ package hyperliquid
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -50,24 +54,72 @@ func NewHTTPClient(baseURL, apiKey, apiSecret string) *HTTPClient {
 	}
 }
 
+// createSignature creates an HMAC-SHA256 signature for Hyperliquid
+func (c *HTTPClient) createSignature(message string) string {
+	if c.apiSecret == "" {
+		return ""
+	}
+
+	h := hmac.New(sha256.New, []byte(c.apiSecret))
+	h.Write([]byte(message))
+	signature := hex.EncodeToString(h.Sum(nil))
+	return signature
+}
+
+// createAuthHeaders creates authentication headers for Hyperliquid
+func (c *HTTPClient) createAuthHeaders(method, path string, body []byte) map[string]string {
+	headers := make(map[string]string)
+
+	if c.apiKey == "" || c.apiSecret == "" {
+		return headers
+	}
+
+	// Create timestamp
+	timestamp := strconv.FormatInt(time.Now().UnixMilli(), 10)
+
+	// Create message to sign: method + path + body + timestamp
+	message := method + path + string(body) + timestamp
+
+	// Create signature
+	signature := c.createSignature(message)
+
+	// Set headers
+	headers["HL-API-KEY"] = c.apiKey
+	headers["HL-API-SIGNATURE"] = signature
+	headers["HL-API-TIMESTAMP"] = timestamp
+
+	return headers
+}
+
 // doRequest performs an HTTP request
 func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body any, result any) error {
-	var reqBody io.Reader
+	var reqBody []byte
+	var reqBodyReader io.Reader
+
 	if body != nil {
 		jsonData, err := json.Marshal(body)
 		if err != nil {
 			return fmt.Errorf("failed to marshal request body: %w", err)
 		}
-		reqBody = bytes.NewBuffer(jsonData)
+		reqBody = jsonData
+		reqBodyReader = bytes.NewBuffer(jsonData)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reqBody)
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reqBodyReader)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+
+	// Add authentication headers for exchange endpoints
+	if strings.Contains(path, "/exchange") && c.apiKey != "" && c.apiSecret != "" {
+		authHeaders := c.createAuthHeaders(method, path, reqBody)
+		for key, value := range authHeaders {
+			req.Header.Set(key, value)
+		}
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

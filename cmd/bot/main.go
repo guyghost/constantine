@@ -16,6 +16,7 @@ import (
 	"github.com/guyghost/constantine/internal/exchanges/coinbase"
 	"github.com/guyghost/constantine/internal/exchanges/dydx"
 	"github.com/guyghost/constantine/internal/exchanges/hyperliquid"
+	"github.com/guyghost/constantine/internal/execution"
 	"github.com/guyghost/constantine/internal/order"
 	"github.com/guyghost/constantine/internal/risk"
 	"github.com/guyghost/constantine/internal/strategy"
@@ -123,7 +124,7 @@ func run() error {
 	}()
 
 	// Initialize components
-	aggregator, strategyEngine, orderManager, riskManager, err := initializeBot()
+	aggregator, strategyEngine, orderManager, riskManager, executionAgent, err := initializeBot()
 	if err != nil {
 		return fmt.Errorf("failed to initialize bot: %w", err)
 	}
@@ -135,7 +136,7 @@ func run() error {
 	defer aggregator.DisconnectAll()
 
 	// Setup callbacks
-	setupCallbacks(strategyEngine, orderManager, riskManager)
+	setupCallbacks(strategyEngine, orderManager, riskManager, executionAgent)
 
 	// Start bot components in background
 	go func() {
@@ -146,7 +147,7 @@ func run() error {
 
 	// Run in headless or TUI mode
 	if *headless {
-		return runHeadless(ctx, aggregator, strategyEngine, orderManager, riskManager)
+		return runHeadless(ctx, aggregator, strategyEngine, orderManager, riskManager, executionAgent)
 	}
 
 	// Create TUI model
@@ -169,6 +170,7 @@ func initializeBot() (
 	*strategy.ScalpingStrategy,
 	*order.Manager,
 	*risk.Manager,
+	*execution.ExecutionAgent,
 	error,
 ) {
 	// Load exchange configurations
@@ -222,7 +224,7 @@ func initializeBot() (
 				exchangeConfigs["dydx"].SubAccountNumber,
 			)
 			if err != nil {
-				return nil, nil, nil, nil, fmt.Errorf("failed to create dYdX client with mnemonic: %w", err)
+				return nil, nil, nil, nil, nil, fmt.Errorf("failed to create dYdX client with mnemonic: %w", err)
 			}
 			log.Printf("dYdX exchange enabled (mnemonic authentication)")
 		} else if exchangeConfigs["dydx"].APISecret != "" {
@@ -233,14 +235,14 @@ func initializeBot() (
 			)
 			log.Printf("dYdX exchange enabled (API key authentication)")
 		} else {
-			return nil, nil, nil, nil, fmt.Errorf("dYdX enabled but no authentication method provided - set DYDX_MNEMONIC or DYDX_API_KEY/DYDX_API_SECRET")
+			return nil, nil, nil, nil, nil, fmt.Errorf("dYdX enabled but no authentication method provided - set DYDX_MNEMONIC or DYDX_API_KEY/DYDX_API_SECRET")
 		}
 
 		exchangesMap["dydx"] = dydxExchange
 	}
 
 	if len(exchangesMap) == 0 {
-		return nil, nil, nil, nil, fmt.Errorf("no exchanges enabled - check ENABLE_* environment variables")
+		return nil, nil, nil, nil, nil, fmt.Errorf("no exchanges enabled - check ENABLE_* environment variables")
 	}
 
 	// Create aggregator
@@ -277,7 +279,11 @@ func initializeBot() (
 	}
 	riskManager := risk.NewManager(riskConfig, initialBalance)
 
-	return aggregator, strategyEngine, orderManager, riskManager, nil
+	// Create execution agent
+	executionConfig := execution.DefaultConfig()
+	executionAgent := execution.NewExecutionAgent(orderManager, riskManager, executionConfig)
+
+	return aggregator, strategyEngine, orderManager, riskManager, executionAgent, nil
 }
 
 // setupCallbacks sets up callbacks between components
@@ -285,6 +291,7 @@ func setupCallbacks(
 	strategyEngine *strategy.ScalpingStrategy,
 	orderManager *order.Manager,
 	riskManager *risk.Manager,
+	executionAgent *execution.ExecutionAgent,
 ) {
 	// Strategy signal callback
 	strategyEngine.SetSignalCallback(func(signal *strategy.Signal) {
@@ -292,21 +299,10 @@ func setupCallbacks(
 			signal.Type, signal.Side, signal.Symbol,
 			signal.Price.StringFixed(2), signal.Strength)
 
-		// Check if we can trade
-		canTrade, reason := riskManager.CanTrade()
-		if !canTrade {
-			log.Printf("Trading blocked: %s", reason)
-			return
-		}
-
-		// Handle entry signals
-		if signal.Type == strategy.SignalTypeEntry && signal.Strength > 0.5 {
-			handleEntrySignal(signal, orderManager, riskManager)
-		}
-
-		// Handle exit signals
-		if signal.Type == strategy.SignalTypeExit {
-			handleExitSignal(signal, orderManager)
+		// Handle signal with execution agent
+		ctx := context.Background()
+		if err := executionAgent.HandleSignal(ctx, signal); err != nil {
+			log.Printf("Execution error: %v", err)
 		}
 	})
 
@@ -334,67 +330,6 @@ func setupCallbacks(
 	orderManager.SetErrorCallback(func(err error) {
 		log.Printf("Order manager error: %v", err)
 	})
-}
-
-// handleEntrySignal handles entry signals from the strategy
-func handleEntrySignal(
-	signal *strategy.Signal,
-	orderManager *order.Manager,
-	riskManager *risk.Manager,
-) {
-	// Calculate position size
-	stopLoss := signal.Price.Mul(decimal.NewFromFloat(0.995)) // 0.5% stop loss
-	if signal.Side == exchanges.OrderSideSell {
-		stopLoss = signal.Price.Mul(decimal.NewFromFloat(1.005))
-	}
-
-	balance := riskManager.GetCurrentBalance()
-	positionSize := riskManager.CalculatePositionSize(signal.Price, stopLoss, balance)
-
-	// Create order request
-	req := &order.OrderRequest{
-		Symbol:     signal.Symbol,
-		Side:       signal.Side,
-		Type:       exchanges.OrderTypeLimit,
-		Price:      signal.Price,
-		Amount:     positionSize,
-		StopLoss:   stopLoss,
-		TakeProfit: signal.Price.Mul(decimal.NewFromFloat(1.01)), // 1% take profit
-	}
-
-	// Validate order
-	positions := orderManager.GetPositions()
-	if err := riskManager.ValidateOrder(req, positions); err != nil {
-		log.Printf("Order validation failed: %v", err)
-		return
-	}
-
-	// Place order
-	ctx := context.Background()
-	placedOrder, err := orderManager.PlaceOrder(ctx, req)
-	if err != nil {
-		log.Printf("Failed to place order: %v", err)
-		return
-	}
-
-	log.Printf("Order placed: %s - %s %s @ $%s",
-		placedOrder.ID, placedOrder.Side, placedOrder.Symbol,
-		placedOrder.Price.StringFixed(2))
-}
-
-// handleExitSignal handles exit signals from the strategy
-func handleExitSignal(
-	signal *strategy.Signal,
-	orderManager *order.Manager,
-) {
-	// Close position for the symbol
-	ctx := context.Background()
-	if err := orderManager.ClosePosition(ctx, signal.Symbol); err != nil {
-		log.Printf("Failed to close position: %v", err)
-		return
-	}
-
-	log.Printf("Position closed: %s", signal.Symbol)
 }
 
 // startBotComponents starts the bot components
@@ -434,6 +369,7 @@ func runHeadless(
 	strategyEngine *strategy.ScalpingStrategy,
 	orderManager *order.Manager,
 	riskManager *risk.Manager,
+	executionAgent *execution.ExecutionAgent,
 ) error {
 	log.Println("=== Constantine Trading Bot - Headless Mode ===")
 	log.Printf("Multi-Exchange Mode: Connected to Hyperliquid, Coinbase, dYdX")
