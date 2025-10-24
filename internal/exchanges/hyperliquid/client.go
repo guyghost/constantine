@@ -17,12 +17,17 @@ import (
 	"time"
 
 	"github.com/guyghost/constantine/internal/exchanges"
+	"github.com/guyghost/constantine/internal/ratelimit"
 	"github.com/shopspring/decimal"
 )
 
 const (
 	hyperliquidAPIURL = "https://api.hyperliquid.xyz"
 	hyperliquidWSURL  = "wss://api.hyperliquid.xyz/ws"
+
+	// Hyperliquid rate limits (conservative estimates)
+	// Generally ~50 requests per second according to docs
+	hyperliquidRateLimit = 40.0 // requests per second (conservative)
 )
 
 // extractCoinFromSymbol extracts the coin name from a symbol (e.g., "BTC-USD" -> "BTC")
@@ -37,18 +42,23 @@ func extractCoinFromSymbol(symbol string) string {
 
 // HTTPClient handles REST API requests to Hyperliquid
 type HTTPClient struct {
-	baseURL    string
-	apiKey     string
-	apiSecret  string
-	httpClient *http.Client
+	baseURL     string
+	apiKey      string
+	apiSecret   string
+	httpClient  *http.Client
+	rateLimiter ratelimit.Limiter
 }
 
 // NewHTTPClient creates a new HTTP client for Hyperliquid
 func NewHTTPClient(baseURL, apiKey, apiSecret string) *HTTPClient {
+	// Create rate limiter with burst capability
+	limiter := ratelimit.NewTokenBucket(hyperliquidRateLimit, int(hyperliquidRateLimit*2))
+
 	return &HTTPClient{
-		baseURL:   baseURL,
-		apiKey:    apiKey,
-		apiSecret: apiSecret,
+		baseURL:     baseURL,
+		apiKey:      apiKey,
+		apiSecret:   apiSecret,
+		rateLimiter: limiter,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -94,6 +104,11 @@ func (c *HTTPClient) createAuthHeaders(method, path string, body []byte) map[str
 
 // doRequest performs an HTTP request
 func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body any, result any) error {
+	// Apply rate limiting before making the request
+	if err := c.rateLimiter.Wait(ctx); err != nil {
+		return fmt.Errorf("rate limit wait failed: %w", err)
+	}
+
 	var reqBody []byte
 	var reqBodyReader io.Reader
 
