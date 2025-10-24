@@ -5,15 +5,29 @@ import (
 
 	"github.com/guyghost/constantine/internal/exchanges"
 	"github.com/guyghost/constantine/internal/order"
-	"github.com/guyghost/constantine/internal/risk"
 	"github.com/guyghost/constantine/internal/strategy"
 	"github.com/shopspring/decimal"
 )
 
+// OrderManager defines the minimal behavior required from an order manager.
+type OrderManager interface {
+	GetPositions() []*order.ManagedPosition
+	PlaceOrder(ctx context.Context, req *order.OrderRequest) (*exchanges.Order, error)
+	ClosePosition(ctx context.Context, symbol string) error
+}
+
+// RiskManager defines the minimal behavior required from a risk manager.
+type RiskManager interface {
+	CanTrade() (bool, string)
+	ValidateOrder(req *order.OrderRequest, openPositions []*order.ManagedPosition) error
+	CalculatePositionSize(entryPrice decimal.Decimal, stopLoss decimal.Decimal, accountBalance decimal.Decimal) decimal.Decimal
+	GetCurrentBalance() decimal.Decimal
+}
+
 // ExecutionAgent handles automated order placement based on trading signals
 type ExecutionAgent struct {
-	orderManager *order.Manager
-	riskManager  *risk.Manager
+	orderManager OrderManager
+	riskManager  RiskManager
 	config       Config
 }
 
@@ -41,7 +55,7 @@ func DefaultConfig() Config {
 }
 
 // NewExecutionAgent creates a new execution agent
-func NewExecutionAgent(orderManager *order.Manager, riskManager *risk.Manager, config Config) *ExecutionAgent {
+func NewExecutionAgent(orderManager OrderManager, riskManager RiskManager, config Config) *ExecutionAgent {
 	return &ExecutionAgent{
 		orderManager: orderManager,
 		riskManager:  riskManager,
@@ -61,17 +75,15 @@ func (e *ExecutionAgent) HandleSignal(ctx context.Context, signal *strategy.Sign
 		return nil
 	}
 
-	// Check if we can trade
-	canTrade, reason := e.riskManager.CanTrade()
-	if !canTrade {
-		return &ExecutionError{
-			Type:    ExecutionErrorTypeRiskCheckFailed,
-			Message: reason,
-		}
-	}
-
 	switch signal.Type {
 	case strategy.SignalTypeEntry:
+		canTrade, reason := e.riskManager.CanTrade()
+		if !canTrade {
+			return &ExecutionError{
+				Type:    ExecutionErrorTypeRiskCheckFailed,
+				Message: reason,
+			}
+		}
 		return e.handleEntrySignal(ctx, signal)
 	case strategy.SignalTypeExit:
 		return e.handleExitSignal(ctx, signal)
