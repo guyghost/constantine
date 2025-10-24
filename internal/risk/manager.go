@@ -140,15 +140,24 @@ func (m *Manager) ValidateOrder(req *order.OrderRequest, openPositions []*order.
 			positionSizeFloat, maxSizeFloat)
 	}
 
-	// Validate position size based on risk per trade
-	maxRisk := m.currentBalance.Mul(m.config.RiskPerTrade).Div(decimal.NewFromInt(100))
-	if positionSize.GreaterThan(maxRisk.Mul(decimal.NewFromInt(100))) {
-		return fmt.Errorf("position size exceeds risk per trade limit")
-	}
-
 	// Check if stop loss is set
 	if req.StopLoss.IsZero() {
 		return fmt.Errorf("stop loss is required")
+	}
+
+	// Validate position risk based on stop distance
+	priceDiff := req.Price.Sub(req.StopLoss).Abs()
+	if priceDiff.IsZero() {
+		return fmt.Errorf("stop loss must differ from entry price")
+	}
+
+	maxRisk := m.currentBalance.Mul(m.config.RiskPerTrade).Div(decimal.NewFromInt(100))
+	potentialLoss := priceDiff.Mul(req.Amount)
+	if potentialLoss.GreaterThan(maxRisk) {
+		potentialLossFloat, _ := potentialLoss.Float64()
+		maxRiskFloat, _ := maxRisk.Float64()
+		return fmt.Errorf("position risk %.2f exceeds max allowed %.2f",
+			potentialLossFloat, maxRiskFloat)
 	}
 
 	return nil

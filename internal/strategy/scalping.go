@@ -105,13 +105,25 @@ func (s *ScalpingStrategy) Start(ctx context.Context) error {
 		s.mu.Unlock()
 		return fmt.Errorf("strategy already running")
 	}
-	s.running = true
+
+	if s.done == nil {
+		s.done = make(chan struct{})
+	}
 	s.mu.Unlock()
 
 	// Subscribe to market data
 	if err := s.subscribeMarketData(ctx); err != nil {
 		return fmt.Errorf("failed to subscribe to market data: %w", err)
 	}
+
+	s.mu.Lock()
+	// Another goroutine could have stopped the strategy while we subscribed
+	if s.running {
+		s.mu.Unlock()
+		return fmt.Errorf("strategy already running")
+	}
+	s.running = true
+	s.mu.Unlock()
 
 	// Start strategy loop
 	go s.run(ctx)
@@ -129,6 +141,7 @@ func (s *ScalpingStrategy) Stop() error {
 	}
 
 	close(s.done)
+	s.done = nil
 	s.running = false
 	return nil
 }
