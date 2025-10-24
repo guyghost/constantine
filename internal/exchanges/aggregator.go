@@ -82,62 +82,66 @@ func (a *MultiExchangeAggregator) DisconnectAll() {
 
 // RefreshData refreshes data from all exchanges
 func (a *MultiExchangeAggregator) RefreshData(ctx context.Context) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	a.mu.RLock()
+	exchanges := make(map[string]Exchange, len(a.exchanges))
+	for name, exchange := range a.exchanges {
+		exchanges[name] = exchange
+	}
+	a.mu.RUnlock()
 
 	totalBalance := decimal.Zero
 	totalPnL := decimal.Zero
+	results := make(map[string]*ExchangeData, len(exchanges))
 
-	for name, exchange := range a.exchanges {
-		exchangeData := a.data.Exchanges[name]
-		if exchangeData == nil {
-			exchangeData = &ExchangeData{Name: name}
-			a.data.Exchanges[name] = exchangeData
+	for name, exchange := range exchanges {
+		exchangeData := &ExchangeData{
+			Name:      name,
+			Connected: exchange.IsConnected(),
 		}
 
-		// Check connection status
-		exchangeData.Connected = exchange.IsConnected()
-
-		// Get balances
 		balances, err := exchange.GetBalance(ctx)
 		if err != nil {
 			exchangeData.Error = err
+			results[name] = exchangeData
 			continue
 		}
 		exchangeData.Balances = balances
-		exchangeData.Error = nil
 
-		// Calculate total balance (assuming USD or equivalent)
 		for _, balance := range balances {
 			if balance.Asset == "USD" || balance.Asset == "USDC" {
 				totalBalance = totalBalance.Add(balance.Total)
 			}
 		}
 
-		// Get positions
 		positions, err := exchange.GetPositions(ctx)
 		if err != nil {
 			exchangeData.Error = err
+			results[name] = exchangeData
 			continue
 		}
 		exchangeData.Positions = positions
 
-		// Calculate total PnL
 		for _, position := range positions {
 			totalPnL = totalPnL.Add(position.UnrealizedPnL)
 		}
 
-		// Get orders (if supported)
 		if exchangeWithOrders, ok := exchange.(interface {
 			GetOrders(context.Context) ([]Order, error)
 		}); ok {
-			orders, err := exchangeWithOrders.GetOrders(ctx)
-			if err == nil {
+			if orders, err := exchangeWithOrders.GetOrders(ctx); err == nil {
 				exchangeData.Orders = orders
 			}
 		}
+
+		results[name] = exchangeData
 	}
 
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	for name, data := range results {
+		a.data.Exchanges[name] = data
+	}
 	a.data.TotalBalance = totalBalance
 	a.data.TotalPnL = totalPnL
 	a.data.LastUpdate = time.Now().Unix()
