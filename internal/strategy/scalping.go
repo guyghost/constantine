@@ -3,12 +3,39 @@ package strategy
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/guyghost/constantine/internal/exchanges"
+	"github.com/guyghost/constantine/internal/telemetry"
 	"github.com/shopspring/decimal"
 )
+
+const strategyAPITimeout = 5 * time.Second
+
+func parseIntEnv(key string, defaultValue int) int {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	if parsed, err := strconv.Atoi(value); err == nil {
+		return parsed
+	}
+	return defaultValue
+}
+
+func parseFloatEnv(key string, defaultValue float64) float64 {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	if parsed, err := strconv.ParseFloat(value, 64); err == nil {
+		return parsed
+	}
+	return defaultValue
+}
 
 // Config holds strategy configuration
 type Config struct {
@@ -27,19 +54,61 @@ type Config struct {
 
 // DefaultConfig returns default strategy configuration
 func DefaultConfig() *Config {
-	return &Config{
+	cfg := &Config{
 		Symbol:            "BTC-USD",
 		ShortEMAPeriod:    9,
 		LongEMAPeriod:     21,
 		RSIPeriod:         14,
 		RSIOversold:       30.0,
 		RSIOverbought:     70.0,
-		TakeProfitPercent: 0.5,  // 0.5%
-		StopLossPercent:   0.25, // 0.25%
+		TakeProfitPercent: 0.5,
+		StopLossPercent:   0.25,
 		MaxPositionSize:   decimal.NewFromFloat(0.1),
 		MinPriceMove:      decimal.NewFromFloat(0.01),
 		UpdateInterval:    1 * time.Second,
 	}
+
+	if symbol := os.Getenv("STRATEGY_SYMBOL"); symbol != "" {
+		cfg.Symbol = symbol
+	}
+	if val := parseIntEnv("STRATEGY_SHORT_EMA", cfg.ShortEMAPeriod); val > 0 {
+		cfg.ShortEMAPeriod = val
+	}
+	if val := parseIntEnv("STRATEGY_LONG_EMA", cfg.LongEMAPeriod); val > 0 {
+		cfg.LongEMAPeriod = val
+	}
+	if val := parseIntEnv("STRATEGY_RSI_PERIOD", cfg.RSIPeriod); val > 0 {
+		cfg.RSIPeriod = val
+	}
+	if val := parseFloatEnv("STRATEGY_RSI_OVERSOLD", cfg.RSIOversold); val > 0 {
+		cfg.RSIOversold = val
+	}
+	if val := parseFloatEnv("STRATEGY_RSI_OVERBOUGHT", cfg.RSIOverbought); val > 0 {
+		cfg.RSIOverbought = val
+	}
+	if val := parseFloatEnv("STRATEGY_TAKE_PROFIT", cfg.TakeProfitPercent); val > 0 {
+		cfg.TakeProfitPercent = val
+	}
+	if val := parseFloatEnv("STRATEGY_STOP_LOSS", cfg.StopLossPercent); val > 0 {
+		cfg.StopLossPercent = val
+	}
+	if value := os.Getenv("STRATEGY_MAX_POSITION_SIZE"); value != "" {
+		if parsed, err := decimal.NewFromString(value); err == nil {
+			cfg.MaxPositionSize = parsed
+		}
+	}
+	if value := os.Getenv("STRATEGY_MIN_PRICE_MOVE"); value != "" {
+		if parsed, err := decimal.NewFromString(value); err == nil {
+			cfg.MinPriceMove = parsed
+		}
+	}
+	if duration := os.Getenv("STRATEGY_UPDATE_INTERVAL"); duration != "" {
+		if parsed, err := time.ParseDuration(duration); err == nil {
+			cfg.UpdateInterval = parsed
+		}
+	}
+
+	return cfg
 }
 
 // ScalpingStrategy implements a scalping trading strategy
@@ -63,6 +132,7 @@ type ScalpingStrategy struct {
 	// Control
 	running bool
 	done    chan struct{}
+	cancel  context.CancelFunc
 }
 
 // NewScalpingStrategy creates a new scalping strategy
@@ -108,25 +178,40 @@ func (s *ScalpingStrategy) Start(ctx context.Context) error {
 
 	if s.done == nil {
 		s.done = make(chan struct{})
+	} else {
+		select {
+		case <-s.done:
+			s.done = make(chan struct{})
+		default:
+		}
 	}
+	doneCh := s.done
+	strategyCtx, cancel := context.WithCancel(ctx)
+	s.cancel = cancel
 	s.mu.Unlock()
 
 	// Subscribe to market data
-	if err := s.subscribeMarketData(ctx); err != nil {
+	if err := s.subscribeMarketData(strategyCtx); err != nil {
+		cancel()
+		s.mu.Lock()
+		s.cancel = nil
+		s.mu.Unlock()
 		return fmt.Errorf("failed to subscribe to market data: %w", err)
 	}
 
 	s.mu.Lock()
 	// Another goroutine could have stopped the strategy while we subscribed
 	if s.running {
+		s.cancel = nil
 		s.mu.Unlock()
+		cancel()
 		return fmt.Errorf("strategy already running")
 	}
 	s.running = true
 	s.mu.Unlock()
 
 	// Start strategy loop
-	go s.run(ctx)
+	go s.run(strategyCtx, doneCh)
 
 	return nil
 }
@@ -140,8 +225,18 @@ func (s *ScalpingStrategy) Stop() error {
 		return nil
 	}
 
-	close(s.done)
-	s.done = nil
+	if s.cancel != nil {
+		s.cancel()
+		s.cancel = nil
+	}
+	if s.done != nil {
+		select {
+		case <-s.done:
+		default:
+			close(s.done)
+		}
+		s.done = nil
+	}
 	s.running = false
 	return nil
 }
@@ -161,19 +256,28 @@ func (s *ScalpingStrategy) GetSignalGenerator() *SignalGenerator {
 // subscribeMarketData subscribes to market data streams
 func (s *ScalpingStrategy) subscribeMarketData(ctx context.Context) error {
 	// Subscribe to ticker
-	if err := s.exchange.SubscribeTicker(ctx, s.config.Symbol, s.handleTicker); err != nil {
+	tickerCtx, cancel := context.WithTimeout(ctx, strategyAPITimeout)
+	if err := s.exchange.SubscribeTicker(tickerCtx, s.config.Symbol, s.handleTicker); err != nil {
+		cancel()
 		return err
 	}
+	cancel()
 
 	// Subscribe to order book
-	if err := s.exchange.SubscribeOrderBook(ctx, s.config.Symbol, s.handleOrderBook); err != nil {
+	orderBookCtx, cancel := context.WithTimeout(ctx, strategyAPITimeout)
+	if err := s.exchange.SubscribeOrderBook(orderBookCtx, s.config.Symbol, s.handleOrderBook); err != nil {
+		cancel()
 		return err
 	}
+	cancel()
 
 	// Subscribe to trades
-	if err := s.exchange.SubscribeTrades(ctx, s.config.Symbol, s.handleTrade); err != nil {
+	tradesCtx, cancel := context.WithTimeout(ctx, strategyAPITimeout)
+	if err := s.exchange.SubscribeTrades(tradesCtx, s.config.Symbol, s.handleTrade); err != nil {
+		cancel()
 		return err
 	}
+	cancel()
 
 	return nil
 }
@@ -215,7 +319,7 @@ func (s *ScalpingStrategy) handleTrade(trade *exchanges.Trade) {
 }
 
 // run is the main strategy loop
-func (s *ScalpingStrategy) run(ctx context.Context) {
+func (s *ScalpingStrategy) run(ctx context.Context, done <-chan struct{}) {
 	ticker := time.NewTicker(s.config.UpdateInterval)
 	defer ticker.Stop()
 
@@ -223,7 +327,7 @@ func (s *ScalpingStrategy) run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-s.done:
+		case <-done:
 			return
 		case <-ticker.C:
 			s.update(ctx)
@@ -270,7 +374,7 @@ func (s *ScalpingStrategy) update(ctx context.Context) {
 
 	// Emit signal
 	if shouldEmit && callback != nil {
-		callback(signal)
+		safeInvoke(func() { callback(signal) })
 	}
 
 	// Check exit conditions for existing positions
@@ -279,7 +383,10 @@ func (s *ScalpingStrategy) update(ctx context.Context) {
 
 // checkExitConditions checks if any positions should be exited
 func (s *ScalpingStrategy) checkExitConditions(ctx context.Context, prices []decimal.Decimal) {
-	positions, err := s.exchange.GetPositions(ctx)
+	callCtx, cancel := context.WithTimeout(ctx, strategyAPITimeout)
+	defer cancel()
+
+	positions, err := s.exchange.GetPositions(callCtx)
 	if err != nil {
 		s.emitError(fmt.Errorf("failed to get positions: %w", err))
 		return
@@ -317,7 +424,7 @@ func (s *ScalpingStrategy) checkExitConditions(ctx context.Context, prices []dec
 			s.mu.RUnlock()
 
 			if callback != nil {
-				callback(signal)
+				safeInvoke(func() { callback(signal) })
 			}
 		}
 	}
@@ -330,7 +437,7 @@ func (s *ScalpingStrategy) emitError(err error) {
 	s.mu.RUnlock()
 
 	if callback != nil {
-		callback(err)
+		safeInvoke(func() { callback(err) })
 	}
 }
 
@@ -356,4 +463,13 @@ func (s *ScalpingStrategy) GetOrderBook() *exchanges.OrderBook {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.orderbook
+}
+
+func safeInvoke(fn func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			telemetry.RecordCallbackPanic()
+		}
+	}()
+	fn()
 }

@@ -41,14 +41,30 @@ func NewWebSocketClient(url, apiKey, apiSecret string) *WebSocketClient {
 
 // Connect establishes WebSocket connection
 func (ws *WebSocketClient) Connect(ctx context.Context) error {
-	var err error
-	ws.conn, _, err = websocket.DefaultDialer.DialContext(ctx, ws.url, nil)
+	ws.mu.Lock()
+	if ws.done == nil {
+		ws.done = make(chan struct{})
+	} else {
+		select {
+		case <-ws.done:
+			ws.done = make(chan struct{})
+		default:
+		}
+	}
+	done := ws.done
+	ws.mu.Unlock()
+
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, ws.url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to dial websocket: %w", err)
 	}
 
+	ws.mu.Lock()
+	ws.conn = conn
+	ws.mu.Unlock()
+
 	// Start message handler
-	go ws.handleMessages()
+	go ws.handleMessages(done)
 
 	return nil
 }
@@ -59,23 +75,35 @@ func (ws *WebSocketClient) Close() error {
 	defer ws.mu.Unlock()
 
 	if ws.conn != nil {
-		close(ws.done)
-		return ws.conn.Close()
+		if ws.done != nil {
+			select {
+			case <-ws.done:
+			default:
+				close(ws.done)
+			}
+			ws.done = nil
+		}
+		err := ws.conn.Close()
+		ws.conn = nil
+		return err
 	}
 	return nil
 }
 
 // handleMessages processes incoming WebSocket messages
-func (ws *WebSocketClient) handleMessages() {
+func (ws *WebSocketClient) handleMessages(done <-chan struct{}) {
 	defer func() {
+		ws.mu.Lock()
 		if ws.conn != nil {
 			ws.conn.Close()
+			ws.conn = nil
 		}
+		ws.mu.Unlock()
 	}()
 
 	for {
 		select {
-		case <-ws.done:
+		case <-done:
 			return
 		default:
 			_, message, err := ws.conn.ReadMessage()
