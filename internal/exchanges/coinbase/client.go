@@ -1,11 +1,13 @@
 package coinbase
 
 import (
+	"bytes"
 	"context"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -86,7 +88,16 @@ func (c *HTTPClient) createJWT(method, path, host string) (string, error) {
 
 // doRequest performs an HTTP request
 func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body any, result any) error {
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, nil)
+	var reqBody io.Reader
+	if body != nil {
+		jsonData, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("failed to marshal request body: %w", err)
+		}
+		reqBody = bytes.NewBuffer(jsonData)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reqBody)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -102,7 +113,6 @@ func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body an
 			return fmt.Errorf("failed to create JWT: %w", err)
 		}
 
-
 		req.Header.Set("Authorization", "Bearer "+jwt)
 	}
 
@@ -112,12 +122,18 @@ func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body an
 	}
 	defer resp.Body.Close()
 
+	// Read response body for error details
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("API error: %s", resp.Status)
+		return fmt.Errorf("API error (%d): %s", resp.StatusCode, string(respBody))
 	}
 
 	if result != nil {
-		if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+		if err := json.Unmarshal(respBody, result); err != nil {
 			return fmt.Errorf("failed to decode response: %w", err)
 		}
 	}
@@ -429,54 +445,385 @@ type CoinbaseOrderRequest struct {
 	ProductID     string `json:"product_id"`
 	Side          string `json:"side"`
 	OrderConfig   struct {
-		LimitLimitGTC struct {
+		MarketMarketIOC *struct {
+			QuoteSize string `json:"quote_size,omitempty"`
+			BaseSize  string `json:"base_size,omitempty"`
+		} `json:"market_market_ioc,omitempty"`
+		LimitLimitGTC *struct {
 			BaseSize   string `json:"base_size"`
 			LimitPrice string `json:"limit_price"`
-		} `json:"limit_limit_gtc"`
+			PostOnly   bool   `json:"post_only,omitempty"`
+		} `json:"limit_limit_gtc,omitempty"`
+		StopLimitStopLimitGTC *struct {
+			BaseSize      string `json:"base_size"`
+			LimitPrice    string `json:"limit_price"`
+			StopPrice     string `json:"stop_price"`
+			StopDirection string `json:"stop_direction"`
+		} `json:"stop_limit_stop_limit_gtc,omitempty"`
 	} `json:"order_configuration"`
+}
+
+// CoinbaseOrderResponse represents the API response for order operations
+type CoinbaseOrderResponse struct {
+	Success      bool   `json:"success"`
+	OrderID      string `json:"order_id"`
+	ProductID    string `json:"product_id"`
+	Side         string `json:"side"`
+	ClientOID    string `json:"client_order_id"`
+	ErrorMessage string `json:"error_message,omitempty"`
+	Order        struct {
+		OrderID          string `json:"order_id"`
+		ProductID        string `json:"product_id"`
+		Side             string `json:"side"`
+		ClientOID        string `json:"client_order_id"`
+		Status           string `json:"status"`
+		OrderType        string `json:"order_type"`
+		CreatedTime      string `json:"created_time"`
+		CompletionTime   string `json:"completion_percentage"`
+		FilledSize       string `json:"filled_size"`
+		AverageFilledPrice string `json:"average_filled_price"`
+		Fee              string `json:"fee"`
+		NumberOfFills    string `json:"number_of_fills"`
+		OrderConfiguration struct {
+			MarketMarketIOC *struct {
+				QuoteSize string `json:"quote_size,omitempty"`
+				BaseSize  string `json:"base_size,omitempty"`
+			} `json:"market_market_ioc,omitempty"`
+			LimitLimitGTC *struct {
+				BaseSize   string `json:"base_size"`
+				LimitPrice string `json:"limit_price"`
+			} `json:"limit_limit_gtc,omitempty"`
+		} `json:"order_configuration"`
+	} `json:"order"`
+}
+
+// CoinbaseListOrdersResponse represents response for listing orders
+type CoinbaseListOrdersResponse struct {
+	Orders []struct {
+		OrderID            string `json:"order_id"`
+		ProductID          string `json:"product_id"`
+		UserID             string `json:"user_id"`
+		OrderConfiguration struct {
+			MarketMarketIOC *struct {
+				QuoteSize string `json:"quote_size,omitempty"`
+				BaseSize  string `json:"base_size,omitempty"`
+			} `json:"market_market_ioc,omitempty"`
+			LimitLimitGTC *struct {
+				BaseSize   string `json:"base_size"`
+				LimitPrice string `json:"limit_price"`
+			} `json:"limit_limit_gtc,omitempty"`
+		} `json:"order_configuration"`
+		Side               string `json:"side"`
+		ClientOrderID      string `json:"client_order_id"`
+		Status             string `json:"status"`
+		TimeInForce        string `json:"time_in_force"`
+		CreatedTime        string `json:"created_time"`
+		CompletionPercentage string `json:"completion_percentage"`
+		FilledSize         string `json:"filled_size"`
+		AverageFilledPrice string `json:"average_filled_price"`
+		Fee                string `json:"fee"`
+		NumberOfFills      string `json:"number_of_fills"`
+		FilledValue        string `json:"filled_value"`
+		PendingCancel      bool   `json:"pending_cancel"`
+		SizeInQuote        bool   `json:"size_in_quote"`
+		TotalFees          string `json:"total_fees"`
+		SizeInclusiveOfFees bool   `json:"size_inclusive_of_fees"`
+		TotalValueAfterFees string `json:"total_value_after_fees"`
+		TriggerStatus      string `json:"trigger_status"`
+		OrderType          string `json:"order_type"`
+		RejectReason       string `json:"reject_reason"`
+		Settled            bool   `json:"settled"`
+		ProductType        string `json:"product_type"`
+	} `json:"orders"`
+	HasNext bool   `json:"has_next"`
+	Cursor  string `json:"cursor"`
 }
 
 // PlaceOrder places a new order
 func (c *Client) PlaceOrder(ctx context.Context, order *exchanges.Order) (*exchanges.Order, error) {
-	// TODO: Implement authentication and real API call
-	// For now, simulate order placement
-	order.ID = fmt.Sprintf("CB-%d", time.Now().UnixNano())
-	order.Status = exchanges.OrderStatusOpen
-	order.CreatedAt = time.Now()
+	// Build request
+	req := CoinbaseOrderRequest{
+		ClientOrderID: uuid.New().String(),
+		ProductID:     order.Symbol,
+		Side:          mapOrderSideToString(order.Side),
+	}
+
+	// Configure order type
+	switch order.Type {
+	case exchanges.OrderTypeMarket:
+		req.OrderConfig.MarketMarketIOC = &struct {
+			QuoteSize string `json:"quote_size,omitempty"`
+			BaseSize  string `json:"base_size,omitempty"`
+		}{
+			BaseSize: order.Amount.String(),
+		}
+	case exchanges.OrderTypeLimit:
+		req.OrderConfig.LimitLimitGTC = &struct {
+			BaseSize   string `json:"base_size"`
+			LimitPrice string `json:"limit_price"`
+			PostOnly   bool   `json:"post_only,omitempty"`
+		}{
+			BaseSize:   order.Amount.String(),
+			LimitPrice: order.Price.String(),
+		}
+	case exchanges.OrderTypeStopLimit:
+		if order.StopPrice.IsZero() {
+			return nil, fmt.Errorf("stop price required for stop limit orders")
+		}
+		stopDirection := "STOP_DIRECTION_STOP_DOWN"
+		if order.Side == exchanges.OrderSideBuy {
+			stopDirection = "STOP_DIRECTION_STOP_UP"
+		}
+		req.OrderConfig.StopLimitStopLimitGTC = &struct {
+			BaseSize      string `json:"base_size"`
+			LimitPrice    string `json:"limit_price"`
+			StopPrice     string `json:"stop_price"`
+			StopDirection string `json:"stop_direction"`
+		}{
+			BaseSize:      order.Amount.String(),
+			LimitPrice:    order.Price.String(),
+			StopPrice:     order.StopPrice.String(),
+			StopDirection: stopDirection,
+		}
+	default:
+		return nil, fmt.Errorf("unsupported order type: %s", order.Type)
+	}
+
+	// Make API request
+	var response CoinbaseOrderResponse
+	err := c.httpClient.doRequest(ctx, "POST", "/brokerage/orders", req, &response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to place order: %w", err)
+	}
+
+	if !response.Success {
+		return nil, fmt.Errorf("order placement failed: %s", response.ErrorMessage)
+	}
+
+	// Parse response
+	order.ID = response.OrderID
+	order.Status = mapCoinbaseStatus(response.Order.Status)
+	order.CreatedAt = parseTimeString(response.Order.CreatedTime)
 	order.UpdatedAt = time.Now()
+
+	// Parse filled information if available
+	if response.Order.FilledSize != "" {
+		filledSize, _ := decimal.NewFromString(response.Order.FilledSize)
+		order.FilledAmount = filledSize
+	}
+	if response.Order.AverageFilledPrice != "" {
+		avgPrice, _ := decimal.NewFromString(response.Order.AverageFilledPrice)
+		order.AveragePrice = avgPrice
+	}
 
 	return order, nil
 }
 
+// Helper function to map order side
+func mapOrderSideToString(side exchanges.OrderSide) string {
+	switch side {
+	case exchanges.OrderSideBuy:
+		return "BUY"
+	case exchanges.OrderSideSell:
+		return "SELL"
+	default:
+		return "BUY"
+	}
+}
+
+// Helper function to map Coinbase status to our status
+func mapCoinbaseStatus(status string) exchanges.OrderStatus {
+	switch status {
+	case "OPEN", "PENDING":
+		return exchanges.OrderStatusOpen
+	case "FILLED":
+		return exchanges.OrderStatusFilled
+	case "CANCELLED":
+		return exchanges.OrderStatusCanceled
+	case "EXPIRED":
+		return exchanges.OrderStatusExpired
+	case "FAILED", "REJECTED":
+		return exchanges.OrderStatusRejected
+	default:
+		return exchanges.OrderStatusOpen
+	}
+}
+
+// Helper function to parse time string
+func parseTimeString(timeStr string) time.Time {
+	t, err := time.Parse(time.RFC3339, timeStr)
+	if err != nil {
+		return time.Now()
+	}
+	return t
+}
+
 // CancelOrder cancels an existing order
 func (c *Client) CancelOrder(ctx context.Context, orderID string) error {
-	// TODO: Implement REST API call
+	type CancelOrderResponse struct {
+		Success bool   `json:"success"`
+		Message string `json:"message,omitempty"`
+	}
+
+	var response CancelOrderResponse
+	path := fmt.Sprintf("/brokerage/orders/batch_cancel")
+	body := map[string][]string{
+		"order_ids": {orderID},
+	}
+
+	err := c.httpClient.doRequest(ctx, "POST", path, body, &response)
+	if err != nil {
+		return fmt.Errorf("failed to cancel order: %w", err)
+	}
+
+	if !response.Success {
+		return fmt.Errorf("cancel order failed: %s", response.Message)
+	}
+
 	return nil
 }
 
 // GetOrder retrieves order details
 func (c *Client) GetOrder(ctx context.Context, orderID string) (*exchanges.Order, error) {
-	// TODO: Implement REST API call
-	return nil, nil
+	type GetOrderResponse struct {
+		Order struct {
+			OrderID            string `json:"order_id"`
+			ProductID          string `json:"product_id"`
+			Side               string `json:"side"`
+			ClientOrderID      string `json:"client_order_id"`
+			Status             string `json:"status"`
+			OrderType          string `json:"order_type"`
+			CreatedTime        string `json:"created_time"`
+			FilledSize         string `json:"filled_size"`
+			AverageFilledPrice string `json:"average_filled_price"`
+			Fee                string `json:"fee"`
+			OrderConfiguration struct {
+				MarketMarketIOC *struct {
+					QuoteSize string `json:"quote_size,omitempty"`
+					BaseSize  string `json:"base_size,omitempty"`
+				} `json:"market_market_ioc,omitempty"`
+				LimitLimitGTC *struct {
+					BaseSize   string `json:"base_size"`
+					LimitPrice string `json:"limit_price"`
+				} `json:"limit_limit_gtc,omitempty"`
+				StopLimitStopLimitGTC *struct {
+					BaseSize      string `json:"base_size"`
+					LimitPrice    string `json:"limit_price"`
+					StopPrice     string `json:"stop_price"`
+					StopDirection string `json:"stop_direction"`
+				} `json:"stop_limit_stop_limit_gtc,omitempty"`
+			} `json:"order_configuration"`
+		} `json:"order"`
+	}
+
+	var response GetOrderResponse
+	path := fmt.Sprintf("/brokerage/orders/historical/%s", orderID)
+	err := c.httpClient.doRequest(ctx, "GET", path, nil, &response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get order: %w", err)
+	}
+
+	// Parse order
+	order := &exchanges.Order{
+		ID:        response.Order.OrderID,
+		Symbol:    response.Order.ProductID,
+		Status:    mapCoinbaseStatus(response.Order.Status),
+		CreatedAt: parseTimeString(response.Order.CreatedTime),
+		UpdatedAt: time.Now(),
+	}
+
+	// Parse side
+	if response.Order.Side == "BUY" {
+		order.Side = exchanges.OrderSideBuy
+	} else {
+		order.Side = exchanges.OrderSideSell
+	}
+
+	// Parse order configuration
+	if response.Order.OrderConfiguration.MarketMarketIOC != nil {
+		order.Type = exchanges.OrderTypeMarket
+		if response.Order.OrderConfiguration.MarketMarketIOC.BaseSize != "" {
+			order.Amount, _ = decimal.NewFromString(response.Order.OrderConfiguration.MarketMarketIOC.BaseSize)
+		}
+	} else if response.Order.OrderConfiguration.LimitLimitGTC != nil {
+		order.Type = exchanges.OrderTypeLimit
+		order.Amount, _ = decimal.NewFromString(response.Order.OrderConfiguration.LimitLimitGTC.BaseSize)
+		order.Price, _ = decimal.NewFromString(response.Order.OrderConfiguration.LimitLimitGTC.LimitPrice)
+	} else if response.Order.OrderConfiguration.StopLimitStopLimitGTC != nil {
+		order.Type = exchanges.OrderTypeStopLimit
+		order.Amount, _ = decimal.NewFromString(response.Order.OrderConfiguration.StopLimitStopLimitGTC.BaseSize)
+		order.Price, _ = decimal.NewFromString(response.Order.OrderConfiguration.StopLimitStopLimitGTC.LimitPrice)
+		order.StopPrice, _ = decimal.NewFromString(response.Order.OrderConfiguration.StopLimitStopLimitGTC.StopPrice)
+	}
+
+	// Parse filled information
+	if response.Order.FilledSize != "" {
+		order.FilledAmount, _ = decimal.NewFromString(response.Order.FilledSize)
+	}
+	if response.Order.AverageFilledPrice != "" {
+		order.AveragePrice, _ = decimal.NewFromString(response.Order.AverageFilledPrice)
+	}
+
+	return order, nil
 }
 
 // GetOpenOrders retrieves all open orders
 func (c *Client) GetOpenOrders(ctx context.Context, symbol string) ([]exchanges.Order, error) {
-	// TODO: Implement real API call
-	// Mock open orders
-	return []exchanges.Order{
-		{
-			ID:        "cb-order-1",
-			Symbol:    symbol,
-			Side:      exchanges.OrderSideBuy,
-			Type:      exchanges.OrderTypeLimit,
-			Price:     decimal.NewFromFloat(49000),
-			Amount:    decimal.NewFromFloat(0.01),
-			Status:    exchanges.OrderStatusOpen,
-			CreatedAt: time.Now().Add(-time.Hour),
+	var response CoinbaseListOrdersResponse
+	path := "/brokerage/orders/historical/batch"
+
+	// Add query parameters for open orders
+	queryParams := "?order_status=OPEN"
+	if symbol != "" {
+		queryParams += "&product_id=" + symbol
+	}
+
+	err := c.httpClient.doRequest(ctx, "GET", path+queryParams, nil, &response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get open orders: %w", err)
+	}
+
+	orders := make([]exchanges.Order, 0, len(response.Orders))
+	for _, cbOrder := range response.Orders {
+		order := exchanges.Order{
+			ID:        cbOrder.OrderID,
+			Symbol:    cbOrder.ProductID,
+			Status:    mapCoinbaseStatus(cbOrder.Status),
+			CreatedAt: parseTimeString(cbOrder.CreatedTime),
 			UpdatedAt: time.Now(),
-		},
-	}, nil
+		}
+
+		// Parse side
+		if cbOrder.Side == "BUY" {
+			order.Side = exchanges.OrderSideBuy
+		} else {
+			order.Side = exchanges.OrderSideSell
+		}
+
+		// Parse order configuration
+		if cbOrder.OrderConfiguration.MarketMarketIOC != nil {
+			order.Type = exchanges.OrderTypeMarket
+			if cbOrder.OrderConfiguration.MarketMarketIOC.BaseSize != "" {
+				order.Amount, _ = decimal.NewFromString(cbOrder.OrderConfiguration.MarketMarketIOC.BaseSize)
+			}
+		} else if cbOrder.OrderConfiguration.LimitLimitGTC != nil {
+			order.Type = exchanges.OrderTypeLimit
+			order.Amount, _ = decimal.NewFromString(cbOrder.OrderConfiguration.LimitLimitGTC.BaseSize)
+			order.Price, _ = decimal.NewFromString(cbOrder.OrderConfiguration.LimitLimitGTC.LimitPrice)
+		}
+
+		// Parse filled information
+		if cbOrder.FilledSize != "" {
+			order.FilledAmount, _ = decimal.NewFromString(cbOrder.FilledSize)
+		}
+		if cbOrder.AverageFilledPrice != "" {
+			order.AveragePrice, _ = decimal.NewFromString(cbOrder.AverageFilledPrice)
+		}
+
+		orders = append(orders, order)
+	}
+
+	return orders, nil
 }
 
 // GetOrderHistory retrieves order history

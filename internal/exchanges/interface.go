@@ -20,8 +20,9 @@ const (
 type OrderType string
 
 const (
-	OrderTypeLimit  OrderType = "limit"
-	OrderTypeMarket OrderType = "market"
+	OrderTypeLimit     OrderType = "limit"
+	OrderTypeMarket    OrderType = "market"
+	OrderTypeStopLimit OrderType = "stop_limit"
 )
 
 // OrderStatus represents the status of an order
@@ -32,6 +33,8 @@ const (
 	OrderStatusFilled    OrderStatus = "filled"
 	OrderStatusCanceled  OrderStatus = "canceled"
 	OrderStatusPartially OrderStatus = "partially_filled"
+	OrderStatusExpired   OrderStatus = "expired"
+	OrderStatusRejected  OrderStatus = "rejected"
 )
 
 // Common errors
@@ -80,6 +83,10 @@ type Order struct {
 	Status        OrderStatus
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+	// Additional fields for advanced order types
+	StopPrice    decimal.Decimal
+	FilledAmount decimal.Decimal
+	AveragePrice decimal.Decimal
 }
 
 // Trade represents a completed trade

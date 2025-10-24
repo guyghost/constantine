@@ -394,12 +394,107 @@ func (m *Manager) updatePositions(ctx context.Context) {
 
 // placeStopLoss places a stop loss order
 func (m *Manager) placeStopLoss(ctx context.Context, order *exchanges.Order, stopLoss decimal.Decimal) {
-	// TODO: Implement stop loss order placement
+	if stopLoss.IsZero() {
+		return
+	}
+
+	// Determine stop loss side (opposite of entry order)
+	stopSide := exchanges.OrderSideSell
+	if order.Side == exchanges.OrderSideSell {
+		stopSide = exchanges.OrderSideBuy
+	}
+
+	// Create stop loss order
+	stopOrder := &exchanges.Order{
+		Symbol:    order.Symbol,
+		Side:      stopSide,
+		Type:      exchanges.OrderTypeStopLimit,
+		Amount:    order.Amount,
+		Price:     stopLoss,      // Limit price for stop loss
+		StopPrice: stopLoss,      // Trigger price
+		Status:    exchanges.OrderStatusOpen,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	// Place the stop loss order
+	placedOrder, err := m.exchange.PlaceOrder(ctx, stopOrder)
+	if err != nil {
+		m.emitError(fmt.Errorf("failed to place stop loss order: %w", err))
+		return
+	}
+
+	// Update order book
+	m.mu.Lock()
+	m.orderBook.OpenOrders[placedOrder.ID] = placedOrder
+
+	// Link to the original position if exists
+	for _, pos := range m.orderBook.Positions {
+		if pos.Symbol == order.Symbol && pos.EntryOrderID == order.ID {
+			pos.StopLossOrderID = placedOrder.ID
+			break
+		}
+	}
+	m.mu.Unlock()
+
+	// Emit order update
+	m.emitOrderUpdate(&OrderUpdate{
+		Order:     placedOrder,
+		Event:     OrderEventCreated,
+		Timestamp: time.Now(),
+	})
 }
 
 // placeTakeProfit places a take profit order
 func (m *Manager) placeTakeProfit(ctx context.Context, order *exchanges.Order, takeProfit decimal.Decimal) {
-	// TODO: Implement take profit order placement
+	if takeProfit.IsZero() {
+		return
+	}
+
+	// Determine take profit side (opposite of entry order)
+	takeProfitSide := exchanges.OrderSideSell
+	if order.Side == exchanges.OrderSideSell {
+		takeProfitSide = exchanges.OrderSideBuy
+	}
+
+	// Create take profit order as limit order
+	takeProfitOrder := &exchanges.Order{
+		Symbol:    order.Symbol,
+		Side:      takeProfitSide,
+		Type:      exchanges.OrderTypeLimit,
+		Amount:    order.Amount,
+		Price:     takeProfit,
+		Status:    exchanges.OrderStatusOpen,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	// Place the take profit order
+	placedOrder, err := m.exchange.PlaceOrder(ctx, takeProfitOrder)
+	if err != nil {
+		m.emitError(fmt.Errorf("failed to place take profit order: %w", err))
+		return
+	}
+
+	// Update order book
+	m.mu.Lock()
+	m.orderBook.OpenOrders[placedOrder.ID] = placedOrder
+
+	// Link to the original position if exists
+	for _, pos := range m.orderBook.Positions {
+		if pos.Symbol == order.Symbol && pos.EntryOrderID == order.ID {
+			pos.TakeProfitOrderID = placedOrder.ID
+			break
+		}
+	}
+	m.mu.Unlock()
+
+	// Emit order update
+	m.emitOrderUpdate(&OrderUpdate{
+		Order:     placedOrder,
+		Event:     OrderEventCreated,
+		Timestamp: time.Now(),
+	})
 }
 
 // addFilledOrder adds an order to the filled orders list with size limit
