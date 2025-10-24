@@ -1,8 +1,7 @@
 package exchanges
 
 import (
-	"log"
-
+	"github.com/guyghost/constantine/internal/logger"
 	"github.com/shopspring/decimal"
 )
 
@@ -20,7 +19,9 @@ func NewDecimalFromInt(i int64) decimal.Decimal {
 func ParseDecimalOrZero(s string) decimal.Decimal {
 	d, err := decimal.NewFromString(s)
 	if err != nil {
-		log.Printf("WARNING: Failed to parse decimal value '%s': %v", s, err)
+		logger.Warn("Failed to parse decimal value",
+			"value", s,
+			"error", err.Error())
 		return decimal.Zero
 	}
 	return d
@@ -30,7 +31,10 @@ func ParseDecimalOrZero(s string) decimal.Decimal {
 func ParseDecimalOrDefault(s string, defaultValue decimal.Decimal) decimal.Decimal {
 	d, err := decimal.NewFromString(s)
 	if err != nil {
-		log.Printf("WARNING: Failed to parse decimal value '%s': %v, using default", s, err)
+		logger.Warn("Failed to parse decimal value, using default",
+			"value", s,
+			"default", defaultValue.String(),
+			"error", err.Error())
 		return defaultValue
 	}
 	return d

@@ -3,11 +3,11 @@ package backtesting
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/guyghost/constantine/internal/exchanges"
+	"github.com/guyghost/constantine/internal/logger"
 	"github.com/guyghost/constantine/internal/strategy"
 	"github.com/shopspring/decimal"
 )
@@ -107,7 +107,7 @@ func (e *Engine) setupStrategyCallbacks() {
 	})
 
 	e.strategy.SetErrorCallback(func(err error) {
-		log.Printf("Strategy error: %v", err)
+		logger.Component("backtesting").WithError(err).Error("Strategy error occurred")
 	})
 }
 
