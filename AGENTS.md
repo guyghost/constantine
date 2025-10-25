@@ -330,6 +330,62 @@ The backtesting agent validates trading strategies against historical data.
 6. **Testing**: Interface-based design enables easy mocking for tests
 7. **TDD Approach**: Development follows Test-Driven Development principles with comprehensive test coverage for all new features
 
+## Version Control
+
+Constantine uses Git for version control with conventional commits to maintain a clean and meaningful commit history.
+
+### Conventional Commits
+
+We follow the [Conventional Commits](https://www.conventionalcommits.org/) specification for all commit messages. This standard provides a consistent format for commit messages that makes it easier to:
+
+- Automatically generate changelogs
+- Determine the type and scope of changes
+- Enable automated versioning
+- Improve code review and release processes
+
+### Commit Message Format
+
+```
+<type>[optional scope]: <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+### Types
+
+- **feat**: A new feature
+- **fix**: A bug fix
+- **docs**: Documentation only changes
+- **style**: Changes that do not affect the meaning of the code (white-space, formatting, etc.)
+- **refactor**: A code change that neither fixes a bug nor adds a feature
+- **perf**: A code change that improves performance
+- **test**: Adding missing tests or correcting existing tests
+- **build**: Changes that affect the build system or external dependencies
+- **ci**: Changes to our CI configuration files and scripts
+- **chore**: Other changes that don't modify src or test files
+
+### Examples
+
+```
+feat: add support for dYdX exchange integration
+fix: resolve websocket reconnection issue in Coinbase client
+docs: update API documentation for new telemetry endpoints
+refactor: simplify order placement logic in execution agent
+test: add integration tests for Hyperliquid exchange
+```
+
+### Breaking Changes
+
+For commits that introduce breaking changes, add an exclamation mark after the type/scope:
+
+```
+feat!: remove deprecated exchange interface methods
+```
+
+And include a footer with `BREAKING CHANGE:` description.
+
 ## Configuration
 
 Exchange agents require specific credentials:

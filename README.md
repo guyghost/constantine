@@ -84,6 +84,10 @@ LOG_LEVEL=debug
 
 ⚠️ **Important** : Ajoutez `.env` à votre `.gitignore` !
 
+> 💡 Pour éviter de stocker les clés en clair, utilisez l'intégration 1Password
+> décrite dans [docs/SECRETS.md](docs/SECRETS.md) avec le template
+> `.env.op.template` et `op run`.
+
 ### Lancer le Bot
 
 ```bash
