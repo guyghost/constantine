@@ -6,12 +6,17 @@ Ce document liste tous les TODOs dans le code avec leurs emplacements exacts et 
 
 ## 📊 Vue d'ensemble
 
-| Catégorie | Nombre | Priorité | Statut |
-|-----------|--------|----------|--------|
-| dYdX WebSocket | 4 | 🟡 Moyenne | Non démarré |
-| Hyperliquid Trading | 8 | 🔴 Haute | Non démarré |
-| Coinbase Trading | 2 | 🟡 Moyenne | Non démarré |
-| **TOTAL** | **14** | - | - |
+| Catégorie | Nombre | Complétés | Priorité | Statut |
+|-----------|--------|-----------|----------|--------|
+| dYdX WebSocket | 4 | 0 | 🟡 Moyenne | Non démarré |
+| Hyperliquid Trading | 8 | 3 | 🔴 Haute | 🟢 **En cours (38%)** |
+| Coinbase Trading | 2 | 0 | 🟡 Moyenne | Non démarré |
+| **TOTAL** | **14** | **3** | - | **21% complété** |
+
+### 🎉 Dernières implémentations (2025-10-25)
+- ✅ GetBalance (Hyperliquid) - Récupération balance réelle
+- ✅ GetPositions (Hyperliquid) - Récupération positions avec PnL
+- ✅ GetOpenOrders (Hyperliquid) - Liste des ordres ouverts
 
 ---
 
@@ -43,34 +48,37 @@ Ces fonctions bloquent l'utilisation de Hyperliquid pour du trading réel.
 - [Hyperliquid API Docs](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/exchange-endpoint)
 - Authentification via signature Ethereum (secp256k1)
 
-### 2. GetBalance - Hyperliquid
-**Fichier:** `internal/exchanges/hyperliquid/client.go:535`
-```go
-// TODO: Implement authentication and real API call
-```
+### 2. ✅ GetBalance - Hyperliquid (COMPLÉTÉ)
+**Fichier:** `internal/exchanges/hyperliquid/client.go:567`
+**Statut:** ✅ **Implémenté le 2025-10-25**
 
-**Description:** Récupération du solde réel du compte
+**Implémentation:**
 - Endpoint: `/info` avec type: `clearinghouseState`
-- Parsing de la structure de réponse Hyperliquid
+- Parsing de la structure marginSummary
+- Calcul: Free = AccountValue - TotalMarginUsed
+- Retourne balance USDC avec total/free/locked
 
-### 3. GetPositions - Hyperliquid
-**Fichier:** `internal/exchanges/hyperliquid/client.go:568`
-```go
-// TODO: Implement authentication and real API call
-```
+### 3. ✅ GetPositions - Hyperliquid (COMPLÉTÉ)
+**Fichier:** `internal/exchanges/hyperliquid/client.go:661`
+**Statut:** ✅ **Implémenté le 2025-10-25**
 
-**Description:** Récupération des positions ouvertes
+**Implémentation:**
 - Endpoint: `/info` avec type: `clearinghouseState`
-- Extraction des positions actives
+- Parse assetPositions array
+- Extraction: coin, size (szi), entryPrice, unrealizedPnL, leverage
+- Filtre les positions à taille zéro
+- Détermine side basé sur le signe de szi
 
-### 4. GetOpenOrders - Hyperliquid
-**Fichier:** `internal/exchanges/hyperliquid/client.go:612`
-```go
-// TODO: Implement authentication and real API call
-```
+### 4. ✅ GetOpenOrders - Hyperliquid (COMPLÉTÉ)
+**Fichier:** `internal/exchanges/hyperliquid/client.go:544`
+**Statut:** ✅ **Implémenté le 2025-10-25**
 
-**Description:** Liste des ordres ouverts
+**Implémentation:**
 - Endpoint: `/info` avec type: `openOrders`
+- Parse array d'ordres: oid, coin, side, limitPx, sz, timestamp
+- Filtre optionnel par symbol
+- Convertit side ("B"/"A") vers OrderSideBuy/Sell
+- Retourne liste d'ordres avec timestamps
 
 ---
 
@@ -316,8 +324,15 @@ Avant de marquer un TODO comme complété:
 
 ## 📊 Suivi
 
-**TODOs restants:** 14/14
-**TODOs complétés:** 0/14
-**Progression:** 0%
+**TODOs restants:** 11/14
+**TODOs complétés:** 3/14
+**Progression:** 21% ✅
+
+**Dernière session:** 2025-10-25
+- ✅ GetBalance (Hyperliquid)
+- ✅ GetPositions (Hyperliquid)
+- ✅ GetOpenOrders (Hyperliquid)
+
+**Prochaine étape:** Implémenter signature Ethereum pour PlaceOrder/CancelOrder
 
 **Dernière révision:** 2025-10-25
