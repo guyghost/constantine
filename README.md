@@ -16,9 +16,14 @@ Constantine est un bot de trading multi-agent pour les marchés de cryptomonnaie
 
 | Exchange | Statut | Authentification | Documentation |
 |----------|--------|------------------|---------------|
-| **dYdX v4** | ✅ **Production Ready** | Mnemonic | [Guide](docs/DYDX_INTEGRATION.md) |
+| **dYdX v4** | ⚠️ **LECTURE SEULE** | Mnemonic | [Guide](docs/DYDX_INTEGRATION.md) |
 | Hyperliquid | 🔧 Demo Mode | À implémenter | - |
 | Coinbase | 🔧 Demo Mode | À implémenter | - |
+
+**⚠️ AVERTISSEMENT IMPORTANT** :
+- **dYdX** : Actuellement en mode **LECTURE SEULE**. Les fonctions de trading (PlaceOrder, CancelOrder) ne sont **PAS implémentées**.
+- Seules les données de marché en temps réel sont fonctionnelles.
+- **NE PAS UTILISER EN PRODUCTION** pour du trading automatique.
 
 Voir [EXCHANGE_STATUS.md](docs/EXCHANGE_STATUS.md) pour plus de détails.
 
@@ -155,13 +160,21 @@ Voir [AGENTS.md](AGENTS.md) pour l'architecture complète.
 - ✅ Testez toujours en backtesting avant production
 - ✅ Commencez avec de petites positions
 
-### Avertissement
+### ⚠️ Avertissements Critiques
 
-⚠️ **Le trading de cryptomonnaies comporte des risques** :
-- Vous pouvez perdre tout votre capital
-- Les marchés sont volatils
-- Testez toujours en démo avant production
-- Ce bot est fourni "tel quel" sans garantie
+**SÉCURITÉ** :
+- ⚠️ **NE JAMAIS** committer votre fichier `.env` contenant vos mnémoniques/clés privées
+- ⚠️ Les mnémoniques donnent **accès complet** à vos fonds - protégez-les comme de l'argent liquide
+- ⚠️ Utilisez un gestionnaire de secrets (Vault, AWS Secrets Manager) en production
+- ⚠️ Commencez avec un wallet dédié et un capital limité que vous pouvez perdre
+
+**TRADING** :
+- ⚠️ **Le trading de cryptomonnaies comporte des risques importants**
+- Vous pouvez perdre **tout votre capital**
+- Les marchés sont extrêmement volatils
+- **Testez toujours en backtesting et mode démo avant production**
+- Ce bot est fourni "tel quel" **sans aucune garantie**
+- Les auteurs ne sont **pas responsables** des pertes financières
 
 ## 📁 Structure du Projet
 

@@ -78,9 +78,44 @@ func NewClientWithMnemonic(mnemonic string, subAccountNumber int) (*Client, erro
 	return c, nil
 }
 
-// Name returns the exchange name
-func (c *Client) Name() string {
-	return "dYdX"
+// NewClientWithURL creates a new dYdX client with custom URLs (for testnet)
+func NewClientWithURL(apiKey, apiSecret, baseURL, wsURL string) *Client {
+	c := &Client{
+		apiKey:    apiKey,
+		apiSecret: apiSecret,
+		mnemonic:  apiSecret, // apiSecret is the mnemonic for dYdX
+		baseURL:   baseURL,
+		wsURL:     wsURL,
+	}
+	c.httpClient = NewHTTPClient(c.baseURL, apiKey, "")
+	return c
+}
+
+// NewClientWithMnemonicAndURL creates a new dYdX client with explicit mnemonic and custom URLs (for testnet)
+func NewClientWithMnemonicAndURL(mnemonic string, subAccountNumber int, baseURL, wsURL string) (*Client, error) {
+	// Validate mnemonic
+	if err := ValidateMnemonic(mnemonic); err != nil {
+		return nil, fmt.Errorf("invalid mnemonic: %w", err)
+	}
+
+	// Create wallet from mnemonic
+	wallet, err := NewWalletFromMnemonic(mnemonic, subAccountNumber)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create wallet: %w", err)
+	}
+
+	// Create signer
+	signer := NewSigner(wallet)
+
+	c := &Client{
+		mnemonic: mnemonic,
+		baseURL:  baseURL,
+		wsURL:    wsURL,
+		wallet:   wallet,
+		signer:   signer,
+	}
+	c.httpClient = NewHTTPClient(c.baseURL, "", "")
+	return c, nil
 }
 
 // Connect establishes connection to the exchange
@@ -254,9 +289,15 @@ func (c *Client) SubscribeTrades(ctx context.Context, symbol string, callback fu
 }
 
 // PlaceOrder places a new order
+// ⚠️ WARNING: NOT IMPLEMENTED - Returns simulated data only!
+// This function does NOT place any real orders on dYdX.
+// DO NOT USE in production - orders will appear successful but nothing will execute.
 func (c *Client) PlaceOrder(ctx context.Context, order *exchanges.Order) (*exchanges.Order, error) {
-	// TODO: Implement REST API call
-	order.ID = fmt.Sprintf("DYDX-%d", time.Now().Unix())
+	// TODO: Implement dYdX v4 order placement API
+	// This is a STUB implementation that returns fake data
+	fmt.Printf("⚠️  WARNING: PlaceOrder is NOT IMPLEMENTED - no real order placed for %s\n", order.Symbol)
+
+	order.ID = fmt.Sprintf("DYDX-FAKE-%d", time.Now().Unix())
 	order.Status = exchanges.OrderStatusOpen
 	order.CreatedAt = time.Now()
 	order.UpdatedAt = time.Now()
@@ -264,26 +305,38 @@ func (c *Client) PlaceOrder(ctx context.Context, order *exchanges.Order) (*excha
 }
 
 // CancelOrder cancels an existing order
+// ⚠️ WARNING: NOT IMPLEMENTED - Returns success without canceling anything!
+// This function does NOT cancel any real orders on dYdX.
 func (c *Client) CancelOrder(ctx context.Context, orderID string) error {
-	// TODO: Implement REST API call
+	// TODO: Implement dYdX v4 order cancellation API
+	fmt.Printf("⚠️  WARNING: CancelOrder is NOT IMPLEMENTED - no order canceled: %s\n", orderID)
 	return nil
 }
 
 // GetOrder retrieves order details
+// ⚠️ WARNING: NOT IMPLEMENTED - Always returns nil!
+// This function does NOT retrieve real order data from dYdX.
 func (c *Client) GetOrder(ctx context.Context, orderID string) (*exchanges.Order, error) {
-	// TODO: Implement REST API call
+	// TODO: Implement dYdX v4 get order API
+	fmt.Printf("⚠️  WARNING: GetOrder is NOT IMPLEMENTED - cannot retrieve order: %s\n", orderID)
 	return nil, nil
 }
 
 // GetOpenOrders retrieves all open orders
+// ⚠️ WARNING: NOT IMPLEMENTED - Always returns empty list!
+// This function does NOT retrieve real orders from dYdX.
 func (c *Client) GetOpenOrders(ctx context.Context, symbol string) ([]exchanges.Order, error) {
-	// TODO: Implement REST API call
+	// TODO: Implement dYdX v4 get open orders API
+	fmt.Printf("⚠️  WARNING: GetOpenOrders is NOT IMPLEMENTED for %s\n", symbol)
 	return []exchanges.Order{}, nil
 }
 
 // GetOrderHistory retrieves order history
+// ⚠️ WARNING: NOT IMPLEMENTED - Always returns empty list!
+// This function does NOT retrieve real order history from dYdX.
 func (c *Client) GetOrderHistory(ctx context.Context, symbol string, limit int) ([]exchanges.Order, error) {
-	// TODO: Implement REST API call
+	// TODO: Implement dYdX v4 get order history API
+	fmt.Printf("⚠️  WARNING: GetOrderHistory is NOT IMPLEMENTED for %s\n", symbol)
 	return []exchanges.Order{}, nil
 }
 
@@ -380,6 +433,11 @@ func (c *Client) GetPosition(ctx context.Context, symbol string) (*exchanges.Pos
 // SupportedSymbols returns list of supported trading symbols
 func (c *Client) SupportedSymbols() []string {
 	return []string{"BTC-USD", "ETH-USD", "SOL-USD", "AVAX-USD"}
+}
+
+// Name returns the exchange name
+func (c *Client) Name() string {
+	return "dYdX"
 }
 
 // GetWalletAddress returns the wallet address if initialized

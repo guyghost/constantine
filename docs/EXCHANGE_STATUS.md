@@ -6,18 +6,30 @@ Ce document détaille l'état d'implémentation de chaque exchange supporté par
 
 | Exchange | Données marché | WebSocket | Trading | Authentification | Statut |
 |----------|----------------|-----------|---------|------------------|---------|
-| dYdX v4 | ✅ Complet | ✅ Complet | 🔧 Partiel | ✅ Mnemonic | **Production Ready** (lecture) |
+| dYdX v4 | ✅ Complet | ✅ Complet | ❌ **NON IMPLÉMENTÉ** | ✅ Mnemonic | ⚠️ **LECTURE SEULE** |
 | Hyperliquid | 🔧 Mock | ✅ Partiel | 🔧 Mock | ❌ À implémenter | **Demo** |
 | Coinbase | 🔧 Mock | 🔧 Stub | 🔧 Mock | ❌ À implémenter | **Demo** |
 
 **Légende** :
 - ✅ Complet : Implémentation fonctionnelle et testée
-- 🔧 Partiel/Mock : Structure présente mais données mockées
+- 🔧 Partiel/Mock : Structure présente mais données mockées ou simulation
 - ❌ À implémenter : Non implémenté
 
-## dYdX v4 ✅ RECOMMANDÉ
+## ⚠️ AVERTISSEMENT CRITIQUE
 
-### État : Production Ready (Lecture seule)
+**AUCUN EXCHANGE N'EST ACTUELLEMENT FONCTIONNEL POUR LE TRADING AUTOMATIQUE**
+
+- **dYdX v4** : Mode lecture seule uniquement - Les fonctions de trading retournent des données simulées
+- **Hyperliquid** : Données simulées uniquement
+- **Coinbase** : Données simulées uniquement
+
+**NE PAS UTILISER EN PRODUCTION POUR DU TRADING RÉEL**
+
+---
+
+## dYdX v4 ⚠️ LECTURE SEULE
+
+### État : LECTURE SEULE (Trading NON implémenté)
 
 **Fonctionnalités implémentées** :
 
@@ -44,10 +56,12 @@ Ce document détaille l'état d'implémentation de chaque exchange supporté par
 - `GetPositions()` - Positions ouvertes
 - Intégration avec subaccount
 
-🔧 **Trading** (Infrastructure prête) :
-- Signer implémenté
-- Headers d'authentification
-- Nécessite implémentation de l'API de trading v4
+❌ **Trading** (NON IMPLÉMENTÉ) :
+- ⚠️ `PlaceOrder()` retourne des données simulées (TODO ligne 258)
+- ⚠️ `CancelOrder()` retourne succès sans action (TODO ligne 266)
+- ⚠️ `GetOrder()` retourne des données simulées (TODO ligne 274)
+- Infrastructure d'authentification présente mais **API de trading v4 non implémentée**
+- **DANGER** : Le code peut sembler fonctionner mais n'exécute AUCUN ordre réel
 
 ### Configuration
 

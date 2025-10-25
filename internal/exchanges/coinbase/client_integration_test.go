@@ -8,8 +8,6 @@ import (
 	"os"
 	"testing"
 	"time"
-
-	"github.com/guyghost/constantine/internal/exchanges"
 )
 
 func TestIntegration_GetTicker(t *testing.T) {

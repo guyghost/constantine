@@ -50,22 +50,29 @@ type Config struct {
 	MaxPositionSize   decimal.Decimal
 	MinPriceMove      decimal.Decimal
 	UpdateInterval    time.Duration
+	// Price sanity checks
+	MaxPriceChangePercent float64 // Maximum allowed price change between updates (default: 5%)
+	MinPrice              decimal.Decimal
+	MaxPrice              decimal.Decimal
 }
 
 // DefaultConfig returns default strategy configuration
 func DefaultConfig() *Config {
 	cfg := &Config{
-		Symbol:            "BTC-USD",
-		ShortEMAPeriod:    9,
-		LongEMAPeriod:     21,
-		RSIPeriod:         14,
-		RSIOversold:       30.0,
-		RSIOverbought:     70.0,
-		TakeProfitPercent: 0.5,
-		StopLossPercent:   0.25,
-		MaxPositionSize:   decimal.NewFromFloat(0.1),
-		MinPriceMove:      decimal.NewFromFloat(0.01),
-		UpdateInterval:    1 * time.Second,
+		Symbol:                "BTC-USD",
+		ShortEMAPeriod:        9,
+		LongEMAPeriod:         21,
+		RSIPeriod:             14,
+		RSIOversold:           30.0,
+		RSIOverbought:         70.0,
+		TakeProfitPercent:     0.5,
+		StopLossPercent:       0.25,
+		MaxPositionSize:       decimal.NewFromFloat(0.1),
+		MinPriceMove:          decimal.NewFromFloat(0.01),
+		UpdateInterval:        1 * time.Second,
+		MaxPriceChangePercent: 5.0,                       // 5% max price change
+		MinPrice:              decimal.NewFromFloat(0.01), // Minimum valid price
+		MaxPrice:              decimal.NewFromFloat(1000000), // Maximum valid price
 	}
 
 	if symbol := os.Getenv("STRATEGY_SYMBOL"); symbol != "" {
@@ -105,6 +112,19 @@ func DefaultConfig() *Config {
 	if duration := os.Getenv("STRATEGY_UPDATE_INTERVAL"); duration != "" {
 		if parsed, err := time.ParseDuration(duration); err == nil {
 			cfg.UpdateInterval = parsed
+		}
+	}
+	if val := parseFloatEnv("STRATEGY_MAX_PRICE_CHANGE_PERCENT", cfg.MaxPriceChangePercent); val > 0 {
+		cfg.MaxPriceChangePercent = val
+	}
+	if value := os.Getenv("STRATEGY_MIN_PRICE"); value != "" {
+		if parsed, err := decimal.NewFromString(value); err == nil && parsed.GreaterThan(decimal.Zero) {
+			cfg.MinPrice = parsed
+		}
+	}
+	if value := os.Getenv("STRATEGY_MAX_PRICE"); value != "" {
+		if parsed, err := decimal.NewFromString(value); err == nil && parsed.GreaterThan(decimal.Zero) {
+			cfg.MaxPrice = parsed
 		}
 	}
 
@@ -287,6 +307,22 @@ func (s *ScalpingStrategy) handleTicker(ticker *exchanges.Ticker) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Price sanity checks
+	if !s.validatePrice(ticker.Last) {
+		s.emitError(fmt.Errorf("price validation failed for %s: price=%s", s.config.Symbol, ticker.Last))
+		return
+	}
+
+	// Check for abnormal price movements
+	if len(s.prices) > 0 {
+		lastPrice := s.prices[len(s.prices)-1]
+		if !s.validatePriceChange(lastPrice, ticker.Last) {
+			s.emitError(fmt.Errorf("abnormal price movement detected for %s: %s -> %s",
+				s.config.Symbol, lastPrice, ticker.Last))
+			return
+		}
+	}
+
 	// Update price history
 	s.prices = append(s.prices, ticker.Last)
 
@@ -294,6 +330,42 @@ func (s *ScalpingStrategy) handleTicker(ticker *exchanges.Ticker) {
 	if len(s.prices) > 100 {
 		s.prices = s.prices[1:]
 	}
+}
+
+// validatePrice checks if a price is within acceptable ranges
+func (s *ScalpingStrategy) validatePrice(price decimal.Decimal) bool {
+	// Price must be positive
+	if price.LessThanOrEqual(decimal.Zero) {
+		return false
+	}
+
+	// Check min/max bounds
+	if !s.config.MinPrice.IsZero() && price.LessThan(s.config.MinPrice) {
+		return false
+	}
+	if !s.config.MaxPrice.IsZero() && price.GreaterThan(s.config.MaxPrice) {
+		return false
+	}
+
+	return true
+}
+
+// validatePriceChange checks if price movement is within acceptable limits
+func (s *ScalpingStrategy) validatePriceChange(oldPrice, newPrice decimal.Decimal) bool {
+	if oldPrice.IsZero() {
+		return true
+	}
+
+	// Calculate percentage change
+	change := newPrice.Sub(oldPrice).Div(oldPrice).Abs().Mul(decimal.NewFromInt(100))
+	maxChange := decimal.NewFromFloat(s.config.MaxPriceChangePercent)
+
+	// Reject if change exceeds threshold
+	if change.GreaterThan(maxChange) {
+		return false
+	}
+
+	return true
 }
 
 // handleOrderBook handles order book updates

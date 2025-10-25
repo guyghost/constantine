@@ -180,9 +180,16 @@ func NewClient(apiKey, apiSecret string) *Client {
 	return c
 }
 
-// Name returns the exchange name
-func (c *Client) Name() string {
-	return "Hyperliquid"
+// NewClientWithURL creates a new Hyperliquid client with custom URLs (for testnet)
+func NewClientWithURL(apiKey, apiSecret, baseURL, wsURL string) *Client {
+	c := &Client{
+		apiKey:    apiKey,
+		apiSecret: apiSecret,
+		baseURL:   baseURL,
+		wsURL:     wsURL,
+	}
+	c.httpClient = NewHTTPClient(c.baseURL, apiKey, apiSecret)
+	return c
 }
 
 // Connect establishes connection to the exchange
@@ -611,4 +618,9 @@ func (c *Client) GetPosition(ctx context.Context, symbol string) (*exchanges.Pos
 // SupportedSymbols returns list of supported trading symbols
 func (c *Client) SupportedSymbols() []string {
 	return []string{"BTC-USD", "ETH-USD", "SOL-USD", "ARB-USD"}
+}
+
+// Name returns the exchange name
+func (c *Client) Name() string {
+	return "Hyperliquid"
 }

@@ -22,21 +22,26 @@ type Config struct {
 	DailyTradingLimit    int             // Maximum trades per day
 	CooldownPeriod       time.Duration   // Cooldown period after consecutive losses
 	ConsecutiveLossLimit int             // Number of consecutive losses to trigger cooldown
+	// Position correlation limits
+	MaxExposurePerSymbol decimal.Decimal // Maximum exposure per symbol as percentage of balance (default: 30%)
+	MaxSameSymbolPositions int           // Maximum number of positions for the same symbol (default: 2)
 }
 
 // DefaultConfig returns default risk management configuration
 func DefaultConfig() *Config {
 	return &Config{
-		MaxPositionSize:      decimal.NewFromFloat(1000),
-		MaxPositions:         3,
-		MaxLeverage:          decimal.NewFromInt(5),
-		MaxDailyLoss:         decimal.NewFromFloat(100),
-		MaxDrawdown:          decimal.NewFromFloat(10), // 10%
-		RiskPerTrade:         decimal.NewFromFloat(1),  // 1%
-		MinAccountBalance:    decimal.NewFromFloat(100),
-		DailyTradingLimit:    50,
-		CooldownPeriod:       15 * time.Minute,
-		ConsecutiveLossLimit: 3,
+		MaxPositionSize:        decimal.NewFromFloat(1000),
+		MaxPositions:           3,
+		MaxLeverage:            decimal.NewFromInt(5),
+		MaxDailyLoss:           decimal.NewFromFloat(100),
+		MaxDrawdown:            decimal.NewFromFloat(10), // 10%
+		RiskPerTrade:           decimal.NewFromFloat(1),  // 1%
+		MinAccountBalance:      decimal.NewFromFloat(100),
+		DailyTradingLimit:      50,
+		CooldownPeriod:         15 * time.Minute,
+		ConsecutiveLossLimit:   3,
+		MaxExposurePerSymbol:   decimal.NewFromFloat(30), // 30% max exposure per symbol
+		MaxSameSymbolPositions: 2,                        // Max 2 positions per symbol
 	}
 }
 
@@ -140,6 +145,11 @@ func (m *Manager) ValidateOrder(req *order.OrderRequest, openPositions []*order.
 			positionSizeFloat, maxSizeFloat)
 	}
 
+	// Check symbol correlation limits
+	if err := m.validateSymbolExposure(req, openPositions); err != nil {
+		return err
+	}
+
 	// Check if stop loss is set
 	if req.StopLoss.IsZero() {
 		return fmt.Errorf("stop loss is required")
@@ -158,6 +168,43 @@ func (m *Manager) ValidateOrder(req *order.OrderRequest, openPositions []*order.
 		maxRiskFloat, _ := maxRisk.Float64()
 		return fmt.Errorf("position risk %.2f exceeds max allowed %.2f",
 			potentialLossFloat, maxRiskFloat)
+	}
+
+	return nil
+}
+
+// validateSymbolExposure checks if adding a new position would exceed symbol exposure limits
+func (m *Manager) validateSymbolExposure(req *order.OrderRequest, openPositions []*order.ManagedPosition) error {
+	// Count positions for the same symbol
+	sameSymbolCount := 0
+	totalExposure := decimal.Zero
+
+	for _, pos := range openPositions {
+		if pos.Symbol == req.Symbol {
+			sameSymbolCount++
+			// Calculate position value
+			posValue := pos.Amount.Mul(pos.EntryPrice)
+			totalExposure = totalExposure.Add(posValue)
+		}
+	}
+
+	// Check max positions per symbol
+	if sameSymbolCount >= m.config.MaxSameSymbolPositions {
+		return fmt.Errorf("maximum positions for symbol %s (%d) reached",
+			req.Symbol, m.config.MaxSameSymbolPositions)
+	}
+
+	// Check total exposure for this symbol
+	newPositionValue := req.Amount.Mul(req.Price)
+	totalExposureWithNew := totalExposure.Add(newPositionValue)
+
+	maxExposure := m.currentBalance.Mul(m.config.MaxExposurePerSymbol).Div(decimal.NewFromInt(100))
+	if totalExposureWithNew.GreaterThan(maxExposure) {
+		totalExposureFloat, _ := totalExposureWithNew.Float64()
+		maxExposureFloat, _ := maxExposure.Float64()
+		exposurePercent, _ := m.config.MaxExposurePerSymbol.Float64()
+		return fmt.Errorf("total exposure for %s would be %.2f, exceeding %.0f%% limit (%.2f)",
+			req.Symbol, totalExposureFloat, exposurePercent, maxExposureFloat)
 	}
 
 	return nil

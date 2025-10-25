@@ -198,9 +198,22 @@ func NewClientWithPortfolio(apiKey, privateKeyPEM, portfolioID string) *Client {
 	return c
 }
 
-// Name returns the exchange name
-func (c *Client) Name() string {
-	return "Coinbase"
+// NewClientWithURL creates a new Coinbase client with custom URLs (for testnet)
+func NewClientWithURL(apiKey, privateKeyPEM, baseURL, wsURL string) *Client {
+	return NewClientWithPortfolioAndURL(apiKey, privateKeyPEM, "", baseURL, wsURL)
+}
+
+// NewClientWithPortfolioAndURL creates a new Coinbase client with portfolio ID and custom URLs
+func NewClientWithPortfolioAndURL(apiKey, privateKeyPEM, portfolioID, baseURL, wsURL string) *Client {
+	c := &Client{
+		apiKey:        apiKey,
+		privateKeyPEM: privateKeyPEM,
+		portfolioID:   portfolioID,
+		baseURL:       baseURL,
+		wsURL:         wsURL,
+	}
+	c.httpClient = NewHTTPClient(c.baseURL, apiKey, privateKeyPEM)
+	return c
 }
 
 // Connect establishes connection to the exchange
@@ -512,18 +525,18 @@ type CoinbaseOrderResponse struct {
 	ClientOID    string `json:"client_order_id"`
 	ErrorMessage string `json:"error_message,omitempty"`
 	Order        struct {
-		OrderID          string `json:"order_id"`
-		ProductID        string `json:"product_id"`
-		Side             string `json:"side"`
-		ClientOID        string `json:"client_order_id"`
-		Status           string `json:"status"`
-		OrderType        string `json:"order_type"`
-		CreatedTime      string `json:"created_time"`
-		CompletionTime   string `json:"completion_percentage"`
-		FilledSize       string `json:"filled_size"`
+		OrderID            string `json:"order_id"`
+		ProductID          string `json:"product_id"`
+		Side               string `json:"side"`
+		ClientOID          string `json:"client_order_id"`
+		Status             string `json:"status"`
+		OrderType          string `json:"order_type"`
+		CreatedTime        string `json:"created_time"`
+		CompletionTime     string `json:"completion_percentage"`
+		FilledSize         string `json:"filled_size"`
 		AverageFilledPrice string `json:"average_filled_price"`
-		Fee              string `json:"fee"`
-		NumberOfFills    string `json:"number_of_fills"`
+		Fee                string `json:"fee"`
+		NumberOfFills      string `json:"number_of_fills"`
 		OrderConfiguration struct {
 			MarketMarketIOC *struct {
 				QuoteSize string `json:"quote_size,omitempty"`
@@ -553,27 +566,27 @@ type CoinbaseListOrdersResponse struct {
 				LimitPrice string `json:"limit_price"`
 			} `json:"limit_limit_gtc,omitempty"`
 		} `json:"order_configuration"`
-		Side               string `json:"side"`
-		ClientOrderID      string `json:"client_order_id"`
-		Status             string `json:"status"`
-		TimeInForce        string `json:"time_in_force"`
-		CreatedTime        string `json:"created_time"`
+		Side                 string `json:"side"`
+		ClientOrderID        string `json:"client_order_id"`
+		Status               string `json:"status"`
+		TimeInForce          string `json:"time_in_force"`
+		CreatedTime          string `json:"created_time"`
 		CompletionPercentage string `json:"completion_percentage"`
-		FilledSize         string `json:"filled_size"`
-		AverageFilledPrice string `json:"average_filled_price"`
-		Fee                string `json:"fee"`
-		NumberOfFills      string `json:"number_of_fills"`
-		FilledValue        string `json:"filled_value"`
-		PendingCancel      bool   `json:"pending_cancel"`
-		SizeInQuote        bool   `json:"size_in_quote"`
-		TotalFees          string `json:"total_fees"`
-		SizeInclusiveOfFees bool   `json:"size_inclusive_of_fees"`
-		TotalValueAfterFees string `json:"total_value_after_fees"`
-		TriggerStatus      string `json:"trigger_status"`
-		OrderType          string `json:"order_type"`
-		RejectReason       string `json:"reject_reason"`
-		Settled            bool   `json:"settled"`
-		ProductType        string `json:"product_type"`
+		FilledSize           string `json:"filled_size"`
+		AverageFilledPrice   string `json:"average_filled_price"`
+		Fee                  string `json:"fee"`
+		NumberOfFills        string `json:"number_of_fills"`
+		FilledValue          string `json:"filled_value"`
+		PendingCancel        bool   `json:"pending_cancel"`
+		SizeInQuote          bool   `json:"size_in_quote"`
+		TotalFees            string `json:"total_fees"`
+		SizeInclusiveOfFees  bool   `json:"size_inclusive_of_fees"`
+		TotalValueAfterFees  string `json:"total_value_after_fees"`
+		TriggerStatus        string `json:"trigger_status"`
+		OrderType            string `json:"order_type"`
+		RejectReason         string `json:"reject_reason"`
+		Settled              bool   `json:"settled"`
+		ProductType          string `json:"product_type"`
 	} `json:"orders"`
 	HasNext bool   `json:"has_next"`
 	Cursor  string `json:"cursor"`
@@ -966,4 +979,9 @@ func (c *Client) GetPosition(ctx context.Context, symbol string) (*exchanges.Pos
 // SupportedSymbols returns list of supported trading symbols
 func (c *Client) SupportedSymbols() []string {
 	return []string{"BTC-USD", "ETH-USD", "SOL-USD", "LINK-USD"}
+}
+
+// Name returns the exchange name
+func (c *Client) Name() string {
+	return "Coinbase"
 }
