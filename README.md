@@ -109,6 +109,7 @@ LOG_LEVEL=debug
 
 - [🚀 Guide de démarrage rapide](docs/QUICKSTART.md)
 - [🏗️ Architecture multi-agents](AGENTS.md)
+- [🔐 Gestion des secrets & CI](docs/SECRETS.md) • [CI Integration](docs/CI.md)
 - [📊 État des exchanges](docs/EXCHANGE_STATUS.md)
 
 ### Exchanges
