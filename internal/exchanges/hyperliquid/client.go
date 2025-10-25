@@ -530,23 +530,82 @@ func (c *Client) GetOrder(ctx context.Context, orderID string) (*exchanges.Order
 	return nil, nil
 }
 
+// HyperliquidOpenOrdersResponse represents the response from open orders API
+type HyperliquidOpenOrdersResponse []struct {
+	Coin      string `json:"coin"`
+	LimitPx   string `json:"limitPx"`
+	Oid       int64  `json:"oid"` // Order ID
+	Side      string `json:"side"`
+	Sz        string `json:"sz"`        // Size
+	Timestamp int64  `json:"timestamp"` // Unix timestamp in ms
+}
+
 // GetOpenOrders retrieves all open orders
 func (c *Client) GetOpenOrders(ctx context.Context, symbol string) ([]exchanges.Order, error) {
-	// TODO: Implement authentication and real API call
-	// For now, return mock data
-	return []exchanges.Order{
-		{
-			ID:        "hl-order-1",
-			Symbol:    symbol,
-			Side:      exchanges.OrderSideBuy,
+	if c.apiKey == "" {
+		return nil, fmt.Errorf("hyperliquid requires an ethereum address (set as API key) to query open orders")
+	}
+
+	request := map[string]any{
+		"type": "openOrders",
+		"user": c.apiKey,
+	}
+
+	var response HyperliquidOpenOrdersResponse
+	err := c.httpClient.doRequest(ctx, "POST", "/info", request, &response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get open orders: %w", err)
+	}
+
+	orders := make([]exchanges.Order, 0, len(response))
+
+	for _, o := range response {
+		// Filter by symbol if specified
+		orderSymbol := o.Coin + "-USD"
+		if symbol != "" && orderSymbol != symbol {
+			continue
+		}
+
+		// Parse price
+		price, err := decimal.NewFromString(o.LimitPx)
+		if err != nil {
+			continue
+		}
+
+		// Parse size
+		size, err := decimal.NewFromString(o.Sz)
+		if err != nil {
+			continue
+		}
+
+		// Determine side
+		var side exchanges.OrderSide
+		if o.Side == "B" || o.Side == "buy" {
+			side = exchanges.OrderSideBuy
+		} else {
+			side = exchanges.OrderSideSell
+		}
+
+		// Convert timestamp
+		timestamp := time.UnixMilli(o.Timestamp)
+
+		order := exchanges.Order{
+			ID:        fmt.Sprintf("%d", o.Oid),
+			Symbol:    orderSymbol,
+			Side:      side,
 			Type:      exchanges.OrderTypeLimit,
-			Price:     decimal.NewFromFloat(49000),
-			Amount:    decimal.NewFromFloat(0.01),
+			Price:     price,
+			Amount:    size,
+			Filled:    decimal.Zero, // Not provided in this response
 			Status:    exchanges.OrderStatusOpen,
-			CreatedAt: time.Now().Add(-time.Hour),
-			UpdatedAt: time.Now(),
-		},
-	}, nil
+			CreatedAt: timestamp,
+			UpdatedAt: timestamp,
+		}
+
+		orders = append(orders, order)
+	}
+
+	return orders, nil
 }
 
 // GetOrderHistory retrieves order history
@@ -565,14 +624,64 @@ type HyperliquidBalanceResponse []struct {
 
 // GetBalance retrieves account balance
 func (c *Client) GetBalance(ctx context.Context) ([]exchanges.Balance, error) {
-	// TODO: Implement authentication and real API call
-	// For now, return mock data
+	// Note: For Hyperliquid, we need a user address to query balance
+	// apiKey should be set to the Ethereum address
+	if c.apiKey == "" {
+		return nil, fmt.Errorf("hyperliquid requires an ethereum address (set as API key) to query balance")
+	}
+
+	request := map[string]any{
+		"type": "clearinghouseState",
+		"user": c.apiKey, // apiKey should be the Ethereum address
+	}
+
+	var response struct {
+		AssetPositions []struct {
+			Position struct {
+				Coin     string                 `json:"coin"`
+				EntryPx  string                 `json:"entryPx"`
+				Leverage map[string]interface{} `json:"leverage"`
+				Szi      string                 `json:"szi"`
+			} `json:"position"`
+		} `json:"assetPositions"`
+		MarginSummary struct {
+			AccountValue    string `json:"accountValue"`
+			TotalMarginUsed string `json:"totalMarginUsed"`
+			TotalNtlPos     string `json:"totalNtlPos"`
+			TotalRawUsd     string `json:"totalRawUsd"`
+			Withdrawable    string `json:"withdrawable"`
+		} `json:"marginSummary"`
+	}
+
+	err := c.httpClient.doRequest(ctx, "POST", "/info", request, &response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get balance: %w", err)
+	}
+
+	// Parse account value (total balance)
+	accountValue, err := decimal.NewFromString(response.MarginSummary.AccountValue)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse account value: %w", err)
+	}
+
+	// Parse margin used (locked)
+	marginUsed, err := decimal.NewFromString(response.MarginSummary.TotalMarginUsed)
+	if err != nil {
+		marginUsed = decimal.Zero
+	}
+
+	// Free = Total - Locked
+	free := accountValue.Sub(marginUsed)
+	if free.IsNegative() {
+		free = decimal.Zero
+	}
+
 	balances := []exchanges.Balance{
 		{
-			Asset:     "USDC",
-			Free:      decimal.NewFromFloat(10000),
-			Locked:    decimal.NewFromFloat(1000),
-			Total:     decimal.NewFromFloat(11000),
+			Asset:     "USDC", // Hyperliquid uses USDC as collateral
+			Free:      free,
+			Locked:    marginUsed,
+			Total:     accountValue,
 			UpdatedAt: time.Now(),
 		},
 	}
@@ -609,23 +718,84 @@ type HyperliquidPositionsResponse struct {
 
 // GetPositions retrieves all open positions
 func (c *Client) GetPositions(ctx context.Context) ([]exchanges.Position, error) {
-	// TODO: Implement authentication and real API call
-	// For now, return mock data
-	positions := []exchanges.Position{
-		{
-			Symbol:        "BTC-USD",
-			Side:          exchanges.OrderSideBuy,
-			Size:          decimal.NewFromFloat(0.1),
-			EntryPrice:    decimal.NewFromFloat(50000),
-			MarkPrice:     decimal.NewFromFloat(51000),
-			Leverage:      decimal.NewFromInt(5),
-			UnrealizedPnL: decimal.NewFromFloat(100),
-			RealizedPnL:   decimal.Zero,
-		},
+	// apiKey should be set to the Ethereum address
+	if c.apiKey == "" {
+		return nil, fmt.Errorf("hyperliquid requires an ethereum address (set as API key) to query positions")
 	}
 
-	// Record position metrics
-	for _, position := range positions {
+	request := map[string]any{
+		"type": "clearinghouseState",
+		"user": c.apiKey,
+	}
+
+	var response HyperliquidPositionsResponse
+	err := c.httpClient.doRequest(ctx, "POST", "/info", request, &response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get positions: %w", err)
+	}
+
+	positions := make([]exchanges.Position, 0, len(response.AssetPositions))
+
+	for _, assetPos := range response.AssetPositions {
+		pos := assetPos.Position
+
+		// Parse size
+		size, err := decimal.NewFromString(pos.Szi)
+		if err != nil {
+			continue
+		}
+
+		// Skip zero positions
+		if size.IsZero() {
+			continue
+		}
+
+		// Determine side based on size sign
+		side := exchanges.OrderSideBuy
+		if size.IsNegative() {
+			side = exchanges.OrderSideSell
+			size = size.Abs() // Make size positive
+		}
+
+		// Parse entry price
+		entryPrice, err := decimal.NewFromString(pos.EntryPx)
+		if err != nil {
+			continue
+		}
+
+		// Parse unrealized PnL
+		unrealizedPnL, err := decimal.NewFromString(pos.UnrealizedPnl)
+		if err != nil {
+			unrealizedPnL = decimal.Zero
+		}
+
+		// Get leverage
+		leverage := decimal.NewFromInt(1) // Default to 1x
+		if pos.Leverage.Value > 0 {
+			leverage = decimal.NewFromInt(int64(pos.Leverage.Value))
+		}
+
+		// Get current mark price (we'll fetch separately or approximate)
+		// For now, calculate from unrealized PnL
+		markPrice := entryPrice // Default to entry price
+
+		// Construct symbol (coin + "-USD")
+		symbol := pos.Coin + "-USD"
+
+		position := exchanges.Position{
+			Symbol:        symbol,
+			Side:          side,
+			Size:          size,
+			EntryPrice:    entryPrice,
+			MarkPrice:     markPrice,
+			Leverage:      leverage,
+			UnrealizedPnL: unrealizedPnL,
+			RealizedPnL:   decimal.Zero, // Not provided in this response
+		}
+
+		positions = append(positions, position)
+
+		// Record position metrics
 		telemetry.RecordPositionUpdate(position.Symbol, "size", position.Size.InexactFloat64())
 		telemetry.RecordPositionUpdate(position.Symbol, "unrealized_pnl", position.UnrealizedPnL.InexactFloat64())
 		telemetry.RecordPositionUpdate(position.Symbol, "entry_price", position.EntryPrice.InexactFloat64())
