@@ -9,6 +9,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/guyghost/constantine/internal/exchanges"
+	"github.com/guyghost/constantine/internal/telemetry"
 )
 
 // WebSocketClient handles WebSocket connections for dYdX
@@ -109,6 +110,7 @@ func (ws *WebSocketClient) handleMessages(done <-chan struct{}) {
 			_, message, err := ws.conn.ReadMessage()
 			if err != nil {
 				// Log error and attempt reconnect
+				telemetry.RecordWebSocketReconnect("dydx")
 				time.Sleep(5 * time.Second)
 				continue
 			}

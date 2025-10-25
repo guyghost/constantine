@@ -9,6 +9,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/guyghost/constantine/internal/exchanges"
+	"github.com/guyghost/constantine/internal/telemetry"
 	"github.com/shopspring/decimal"
 )
 
@@ -119,6 +120,9 @@ func (ws *WebSocketClient) handleMessages(done <-chan struct{}) {
 					// Max retries exceeded, exit
 					return
 				}
+
+				// Record reconnect attempt
+				telemetry.RecordWebSocketReconnect("coinbase")
 
 				// Exponential backoff with context check
 				select {

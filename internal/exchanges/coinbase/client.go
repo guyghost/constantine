@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/guyghost/constantine/internal/exchanges"
 	"github.com/guyghost/constantine/internal/ratelimit"
+	"github.com/guyghost/constantine/internal/telemetry"
 	"github.com/shopspring/decimal"
 )
 
@@ -110,6 +111,8 @@ func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body an
 		return fmt.Errorf("rate limit wait failed: %w", err)
 	}
 
+	start := time.Now()
+
 	var reqBody io.Reader
 	if body != nil {
 		jsonData, err := json.Marshal(body)
@@ -143,6 +146,7 @@ func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body an
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		telemetry.RecordAPIRequest("coinbase", path, time.Since(start))
 		return fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
@@ -150,18 +154,24 @@ func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body an
 	// Read response body for error details
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		telemetry.RecordAPIRequest("coinbase", path, time.Since(start))
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
 
 	if resp.StatusCode >= 400 {
+		telemetry.RecordAPIRequest("coinbase", path, time.Since(start))
 		return fmt.Errorf("API error (%d): %s", resp.StatusCode, string(respBody))
 	}
 
 	if result != nil {
 		if err := json.Unmarshal(respBody, result); err != nil {
+			telemetry.RecordAPIRequest("coinbase", path, time.Since(start))
 			return fmt.Errorf("failed to decode response: %w", err)
 		}
 	}
+
+	// Record successful request
+	telemetry.RecordAPIRequest("coinbase", path, time.Since(start))
 
 	return nil
 }
@@ -939,6 +949,11 @@ func (c *Client) GetBalance(ctx context.Context) ([]exchanges.Balance, error) {
 		}
 	}
 
+	// Record balance metrics
+	for _, balance := range balances {
+		telemetry.RecordBalanceUpdate(balance.Asset, balance.Total.InexactFloat64())
+	}
+
 	return balances, nil
 }
 
@@ -965,6 +980,15 @@ func (c *Client) GetPositions(ctx context.Context) ([]exchanges.Position, error)
 				RealizedPnL:   decimal.Zero,
 			})
 		}
+	}
+
+	// Record position metrics
+	for _, position := range positions {
+		telemetry.RecordPositionUpdate(position.Symbol, "size", position.Size.InexactFloat64())
+		telemetry.RecordPositionUpdate(position.Symbol, "unrealized_pnl", position.UnrealizedPnL.InexactFloat64())
+		telemetry.RecordPositionUpdate(position.Symbol, "entry_price", position.EntryPrice.InexactFloat64())
+		telemetry.RecordPositionUpdate(position.Symbol, "mark_price", position.MarkPrice.InexactFloat64())
+		telemetry.RecordPnLUpdate(position.Symbol, position.UnrealizedPnL.InexactFloat64())
 	}
 
 	return positions, nil

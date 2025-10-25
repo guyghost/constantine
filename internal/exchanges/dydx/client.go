@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/guyghost/constantine/internal/exchanges"
+	"github.com/guyghost/constantine/internal/telemetry"
 	"github.com/shopspring/decimal"
 )
 
@@ -380,6 +381,11 @@ func (c *Client) GetBalance(ctx context.Context) ([]exchanges.Balance, error) {
 		}
 	}
 
+	// Record balance metrics
+	for _, balance := range balances {
+		telemetry.RecordBalanceUpdate(balance.Asset, balance.Total.InexactFloat64())
+	}
+
 	return balances, nil
 }
 
@@ -419,6 +425,15 @@ func (c *Client) GetPositions(ctx context.Context) ([]exchanges.Position, error)
 				})
 			}
 		}
+	}
+
+	// Record position metrics
+	for _, position := range positions {
+		telemetry.RecordPositionUpdate(position.Symbol, "size", position.Size.InexactFloat64())
+		telemetry.RecordPositionUpdate(position.Symbol, "unrealized_pnl", position.UnrealizedPnL.InexactFloat64())
+		telemetry.RecordPositionUpdate(position.Symbol, "entry_price", position.EntryPrice.InexactFloat64())
+		telemetry.RecordPositionUpdate(position.Symbol, "mark_price", position.MarkPrice.InexactFloat64())
+		telemetry.RecordPnLUpdate(position.Symbol, position.UnrealizedPnL.InexactFloat64())
 	}
 
 	return positions, nil

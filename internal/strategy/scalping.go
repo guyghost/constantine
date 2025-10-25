@@ -70,8 +70,8 @@ func DefaultConfig() *Config {
 		MaxPositionSize:       decimal.NewFromFloat(0.1),
 		MinPriceMove:          decimal.NewFromFloat(0.01),
 		UpdateInterval:        1 * time.Second,
-		MaxPriceChangePercent: 5.0,                       // 5% max price change
-		MinPrice:              decimal.NewFromFloat(0.01), // Minimum valid price
+		MaxPriceChangePercent: 5.0,                           // 5% max price change
+		MinPrice:              decimal.NewFromFloat(0.01),    // Minimum valid price
 		MaxPrice:              decimal.NewFromFloat(1000000), // Maximum valid price
 	}
 
@@ -435,6 +435,17 @@ func (s *ScalpingStrategy) update(ctx context.Context) {
 		return
 	}
 
+	// Record signal metrics
+	if signal.Type == SignalTypeEntry {
+		if signal.Side == exchanges.OrderSideBuy {
+			telemetry.RecordSignal("buy")
+		} else {
+			telemetry.RecordSignal("sell")
+		}
+	} else if signal.Type == SignalTypeExit {
+		telemetry.RecordSignal("exit")
+	}
+
 	// Check if we should emit this signal
 	s.mu.Lock()
 	shouldEmit := s.lastSignal == nil || signal.Type != s.lastSignal.Type || signal.Side != s.lastSignal.Side
@@ -491,6 +502,9 @@ func (s *ScalpingStrategy) checkExitConditions(ctx context.Context, prices []dec
 				Reason:   "Stop loss or take profit triggered",
 			}
 
+			// Record exit signal
+			telemetry.RecordSignal("exit")
+
 			s.mu.RLock()
 			callback := s.onSignal
 			s.mu.RUnlock()
@@ -504,6 +518,9 @@ func (s *ScalpingStrategy) checkExitConditions(ctx context.Context, prices []dec
 
 // emitError emits an error through the error callback
 func (s *ScalpingStrategy) emitError(err error) {
+	// Record error
+	telemetry.RecordError("strategy_error")
+
 	s.mu.RLock()
 	callback := s.onError
 	s.mu.RUnlock()

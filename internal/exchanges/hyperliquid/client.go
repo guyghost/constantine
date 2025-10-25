@@ -18,6 +18,7 @@ import (
 
 	"github.com/guyghost/constantine/internal/exchanges"
 	"github.com/guyghost/constantine/internal/ratelimit"
+	"github.com/guyghost/constantine/internal/telemetry"
 	"github.com/shopspring/decimal"
 )
 
@@ -109,6 +110,8 @@ func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body an
 		return fmt.Errorf("rate limit wait failed: %w", err)
 	}
 
+	start := time.Now()
+
 	var reqBody []byte
 	var reqBodyReader io.Reader
 
@@ -139,19 +142,25 @@ func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body an
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		telemetry.RecordAPIRequest("hyperliquid", path, time.Since(start))
 		return fmt.Errorf("failed to execute request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		telemetry.RecordAPIRequest("hyperliquid", path, time.Since(start))
 		return fmt.Errorf("API error: status=%d", resp.StatusCode)
 	}
 
 	if result != nil {
 		if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+			telemetry.RecordAPIRequest("hyperliquid", path, time.Since(start))
 			return fmt.Errorf("failed to decode response: %w", err)
 		}
 	}
+
+	// Record successful request
+	telemetry.RecordAPIRequest("hyperliquid", path, time.Since(start))
 
 	return nil
 }
@@ -558,7 +567,7 @@ type HyperliquidBalanceResponse []struct {
 func (c *Client) GetBalance(ctx context.Context) ([]exchanges.Balance, error) {
 	// TODO: Implement authentication and real API call
 	// For now, return mock data
-	return []exchanges.Balance{
+	balances := []exchanges.Balance{
 		{
 			Asset:     "USDC",
 			Free:      decimal.NewFromFloat(10000),
@@ -566,7 +575,14 @@ func (c *Client) GetBalance(ctx context.Context) ([]exchanges.Balance, error) {
 			Total:     decimal.NewFromFloat(11000),
 			UpdatedAt: time.Now(),
 		},
-	}, nil
+	}
+
+	// Record balance metrics
+	for _, balance := range balances {
+		telemetry.RecordBalanceUpdate(balance.Asset, balance.Total.InexactFloat64())
+	}
+
+	return balances, nil
 }
 
 // HyperliquidPositionsResponse represents the response from Hyperliquid positions API
@@ -595,7 +611,7 @@ type HyperliquidPositionsResponse struct {
 func (c *Client) GetPositions(ctx context.Context) ([]exchanges.Position, error) {
 	// TODO: Implement authentication and real API call
 	// For now, return mock data
-	return []exchanges.Position{
+	positions := []exchanges.Position{
 		{
 			Symbol:        "BTC-USD",
 			Side:          exchanges.OrderSideBuy,
@@ -606,7 +622,18 @@ func (c *Client) GetPositions(ctx context.Context) ([]exchanges.Position, error)
 			UnrealizedPnL: decimal.NewFromFloat(100),
 			RealizedPnL:   decimal.Zero,
 		},
-	}, nil
+	}
+
+	// Record position metrics
+	for _, position := range positions {
+		telemetry.RecordPositionUpdate(position.Symbol, "size", position.Size.InexactFloat64())
+		telemetry.RecordPositionUpdate(position.Symbol, "unrealized_pnl", position.UnrealizedPnL.InexactFloat64())
+		telemetry.RecordPositionUpdate(position.Symbol, "entry_price", position.EntryPrice.InexactFloat64())
+		telemetry.RecordPositionUpdate(position.Symbol, "mark_price", position.MarkPrice.InexactFloat64())
+		telemetry.RecordPnLUpdate(position.Symbol, position.UnrealizedPnL.InexactFloat64())
+	}
+
+	return positions, nil
 }
 
 // GetPosition retrieves a specific position

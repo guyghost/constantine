@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/guyghost/constantine/internal/ratelimit"
+	"github.com/guyghost/constantine/internal/telemetry"
 )
 
 const (
@@ -51,6 +52,8 @@ func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body an
 		return fmt.Errorf("rate limit wait failed: %w", err)
 	}
 
+	start := time.Now()
+
 	var reqBody io.Reader
 	if body != nil {
 		jsonData, err := json.Marshal(body)
@@ -77,6 +80,7 @@ func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body an
 	// Execute request
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		telemetry.RecordAPIRequest("dydx", path, time.Since(start))
 		return fmt.Errorf("failed to execute request: %w", err)
 	}
 	defer resp.Body.Close()
@@ -84,20 +88,26 @@ func (c *HTTPClient) doRequest(ctx context.Context, method, path string, body an
 	// Read response
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		telemetry.RecordAPIRequest("dydx", path, time.Since(start))
 		return fmt.Errorf("failed to read response: %w", err)
 	}
 
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
+		telemetry.RecordAPIRequest("dydx", path, time.Since(start))
 		return fmt.Errorf("API error: status=%d, body=%s", resp.StatusCode, string(respBody))
 	}
 
 	// Parse response
 	if result != nil {
 		if err := json.Unmarshal(respBody, result); err != nil {
+			telemetry.RecordAPIRequest("dydx", path, time.Since(start))
 			return fmt.Errorf("failed to parse response: %w", err)
 		}
 	}
+
+	// Record successful request
+	telemetry.RecordAPIRequest("dydx", path, time.Since(start))
 
 	return nil
 }
