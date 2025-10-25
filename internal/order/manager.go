@@ -328,9 +328,12 @@ func (m *Manager) updateOrders(ctx context.Context) {
 // handleOrderStatusChange handles order status changes
 func (m *Manager) handleOrderStatusChange(newOrder, oldOrder *exchanges.Order) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
-	var event OrderEvent
+	var (
+		event              OrderEvent
+		positionToNotify   *ManagedPosition
+		shouldEmitPosition bool
+	)
 
 	switch newOrder.Status {
 	case exchanges.OrderStatusFilled:
@@ -339,7 +342,10 @@ func (m *Manager) handleOrderStatusChange(newOrder, oldOrder *exchanges.Order) {
 		m.addFilledOrder(newOrder)
 
 		// Update or create position
-		m.handleFilledOrder(newOrder)
+		if position := m.handleFilledOrder(newOrder); position != nil {
+			positionToNotify = position
+			shouldEmitPosition = true
+		}
 
 	case exchanges.OrderStatusPartially:
 		event = OrderEventPartiallyFilled
@@ -348,6 +354,12 @@ func (m *Manager) handleOrderStatusChange(newOrder, oldOrder *exchanges.Order) {
 	case exchanges.OrderStatusCanceled:
 		event = OrderEventCanceled
 		delete(m.orderBook.OpenOrders, newOrder.ID)
+	}
+
+	m.mu.Unlock()
+
+	if shouldEmitPosition && positionToNotify != nil {
+		m.emitPositionUpdate(positionToNotify)
 	}
 
 	// Emit order update
@@ -359,7 +371,7 @@ func (m *Manager) handleOrderStatusChange(newOrder, oldOrder *exchanges.Order) {
 }
 
 // handleFilledOrder handles a filled order and updates positions
-func (m *Manager) handleFilledOrder(order *exchanges.Order) {
+func (m *Manager) handleFilledOrder(order *exchanges.Order) *ManagedPosition {
 	position, exists := m.orderBook.Positions[order.Symbol]
 
 	if !exists {
@@ -387,7 +399,7 @@ func (m *Manager) handleFilledOrder(order *exchanges.Order) {
 		}
 
 		m.orderBook.Positions[order.Symbol] = position
-		m.emitPositionUpdate(position)
+		return position
 	} else {
 		// Update existing position or close it
 		if (position.Side == PositionSideLong && order.Side == exchanges.OrderSideSell) ||
@@ -401,9 +413,11 @@ func (m *Manager) handleFilledOrder(order *exchanges.Order) {
 			position.ExitOrderID = order.ID
 
 			delete(m.orderBook.Positions, order.Symbol)
-			m.emitPositionUpdate(position)
+			return position
 		}
 	}
+
+	return nil
 }
 
 // calculatePnL calculates profit/loss for a position

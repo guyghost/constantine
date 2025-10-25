@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/guyghost/constantine/internal/telemetry"
 	"github.com/shopspring/decimal"
 )
 
@@ -53,6 +54,7 @@ func (a *MultiExchangeAggregator) ConnectAll(ctx context.Context) error {
 
 	for name, exchange := range a.exchanges {
 		if err := exchange.Connect(ctx); err != nil {
+			telemetry.RecordError(fmt.Sprintf("%s_connect", name))
 			a.data.Exchanges[name] = &ExchangeData{
 				Name:      name,
 				Connected: false,
@@ -99,13 +101,17 @@ func (a *MultiExchangeAggregator) RefreshData(ctx context.Context) error {
 			Connected: exchange.IsConnected(),
 		}
 
+		balanceStart := time.Now()
 		balances, err := exchange.GetBalance(ctx)
+		telemetry.RecordAPIRequest(name, "GetBalance", time.Since(balanceStart))
 		if err != nil {
+			telemetry.RecordError(fmt.Sprintf("%s_get_balance", name))
 			exchangeData.Error = err
 			results[name] = exchangeData
 			continue
 		}
 		exchangeData.Balances = balances
+		recordBalanceMetrics(name, balances)
 
 		for _, balance := range balances {
 			if balance.Asset == "USD" || balance.Asset == "USDC" {
@@ -113,13 +119,17 @@ func (a *MultiExchangeAggregator) RefreshData(ctx context.Context) error {
 			}
 		}
 
+		positionStart := time.Now()
 		positions, err := exchange.GetPositions(ctx)
+		telemetry.RecordAPIRequest(name, "GetPositions", time.Since(positionStart))
 		if err != nil {
+			telemetry.RecordError(fmt.Sprintf("%s_get_positions", name))
 			exchangeData.Error = err
 			results[name] = exchangeData
 			continue
 		}
 		exchangeData.Positions = positions
+		recordPositionMetrics(name, positions)
 
 		for _, position := range positions {
 			totalPnL = totalPnL.Add(position.UnrealizedPnL)
@@ -128,7 +138,12 @@ func (a *MultiExchangeAggregator) RefreshData(ctx context.Context) error {
 		if exchangeWithOrders, ok := exchange.(interface {
 			GetOrders(context.Context) ([]Order, error)
 		}); ok {
-			if orders, err := exchangeWithOrders.GetOrders(ctx); err == nil {
+			orderStart := time.Now()
+			orders, err := exchangeWithOrders.GetOrders(ctx)
+			telemetry.RecordAPIRequest(name, "GetOrders", time.Since(orderStart))
+			if err != nil {
+				telemetry.RecordError(fmt.Sprintf("%s_get_orders", name))
+			} else {
 				exchangeData.Orders = orders
 			}
 		}
@@ -145,6 +160,9 @@ func (a *MultiExchangeAggregator) RefreshData(ctx context.Context) error {
 	a.data.TotalBalance = totalBalance
 	a.data.TotalPnL = totalPnL
 	a.data.LastUpdate = time.Now().Unix()
+	if totalPnLFloat, ok := totalPnL.Float64(); ok {
+		telemetry.RecordPnLUpdate("total", totalPnLFloat)
+	}
 
 	return nil
 }
@@ -212,4 +230,25 @@ func (a *MultiExchangeAggregator) GetOrderBook(ctx context.Context, exchangeName
 	}
 
 	return exchange.GetOrderBook(ctx, symbol, depth)
+}
+
+func recordBalanceMetrics(exchange string, balances []Balance) {
+	for _, balance := range balances {
+		total, ok := balance.Total.Float64()
+		if !ok {
+			continue
+		}
+		telemetry.RecordBalanceUpdate(fmt.Sprintf("%s:%s", exchange, balance.Asset), total)
+	}
+}
+
+func recordPositionMetrics(exchange string, positions []Position) {
+	for _, position := range positions {
+		if size, ok := position.Size.Float64(); ok {
+			telemetry.RecordPositionUpdate(position.Symbol, fmt.Sprintf("%s:size", exchange), size)
+		}
+		if pnl, ok := position.UnrealizedPnL.Float64(); ok {
+			telemetry.RecordPnLUpdate(fmt.Sprintf("%s:%s", exchange, position.Symbol), pnl)
+		}
+	}
 }
