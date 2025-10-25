@@ -9,11 +9,20 @@ Ce document liste tous les TODOs dans le code avec leurs emplacements exacts et 
 | Catégorie | Nombre | Complétés | Priorité | Statut |
 |-----------|--------|-----------|----------|--------|
 | dYdX WebSocket | 4 | 4 | 🟡 Moyenne | ✅ **COMPLÉTÉ (100%)** |
-| Hyperliquid Trading | 8 | 3 | 🔴 Haute | 🟢 **En cours (38%)** |
-| Coinbase Trading | 2 | 2 | 🟡 Moyenne | ✅ **COMPLÉTÉ (100%)** |
-| **TOTAL** | **14** | **9** | - | **64% complété** ✅ |
+| Hyperliquid Trading | 8 | 5 | 🔴 Haute | 🟢 **En cours (63%)** |
+| Coinbase Total | 3 | 3 | 🟡 Moyenne | ✅ **COMPLÉTÉ (100%)** |
+| **TOTAL** | **15** | **12** | - | **80% complété** ✅✅✅ |
 
-### 🎉 Dernières implémentations (2025-10-25 Session 2)
+### 🎉 Dernières implémentations (2025-10-25 Session 3)
+
+**Hyperliquid (2 nouveaux):**
+- ✅ GetCandles - Déjà implémenté (OHLCV via candleSnapshot)
+- ✅ GetOrder - Statut d'ordre via orderStatus API
+
+**Coinbase WebSocket (1 nouveau):**
+- ✅ Message Routing - Déjà implémenté, removed TODO comment
+
+### Session 2 (2025-10-25)
 
 **Coinbase (2/2 complétés):**
 - ✅ GetOrderHistory - Historique des ordres via API Coinbase
@@ -25,7 +34,9 @@ Ce document liste tous les TODOs dans le code avec leurs emplacements exacts et 
 - ✅ OrderBook parsing - Parsing bids/asks arrays
 - ✅ Trade parsing - Parsing trades avec price/size/side
 
-**Hyperliquid (3/8 complétés - Session 1):**
+### Session 1 (2025-10-25)
+
+**Hyperliquid (3/8 complétés):**
 - ✅ GetBalance - Récupération balance réelle
 - ✅ GetPositions - Récupération positions avec PnL
 - ✅ GetOpenOrders - Liste des ordres ouverts
@@ -94,47 +105,52 @@ Ces fonctions bloquent l'utilisation de Hyperliquid pour du trading réel.
 
 ---
 
-## 🟡 Priorité Moyenne - Hyperliquid Market Data
+## ✅ Hyperliquid Market Data - COMPLÉTÉ (4/4)
 
-Ces fonctions sont nécessaires pour avoir des données de marché réelles.
+**Note:** Ces fonctions étaient en fait déjà implémentées ! Pas de vrais TODOs.
 
-### 5. GetTicker - Hyperliquid
-**Fichier:** `internal/exchanges/hyperliquid/client.go:523`
-```go
-// TODO: Implement REST API call
-```
+### 5. ✅ GetTicker - Hyperliquid (DÉJÀ IMPLÉMENTÉ)
+**Fichier:** `internal/exchanges/hyperliquid/client.go:254`
+**Statut:** ✅ **Déjà implémenté depuis le début**
 
-**Description:** Prix en temps réel
-- Endpoint: `/info` avec type: `allMids`
-- Parsing des données ticker
+**Implémentation:**
+- POST /info avec type: "allMids"
+- Parse HyperliquidTickerResponse array
+- Extract mid price pour le coin
+- Approximate bid/ask from mid price
+- Full ticker with volume24h
 
-### 6. GetOrderBook - Hyperliquid
-**Fichier:** `internal/exchanges/hyperliquid/client.go:529`
-```go
-// TODO: Implement REST API call
-```
+### 6. ✅ GetOrderBook - Hyperliquid (DÉJÀ IMPLÉMENTÉ)
+**Fichier:** `internal/exchanges/hyperliquid/client.go:302`
+**Statut:** ✅ **Déjà implémenté depuis le début**
 
-**Description:** Carnet d'ordres
-- Endpoint: `/info` avec type: `l2Book`
-- Parsing bids/asks
+**Implémentation:**
+- POST /info avec type: "l2Book"
+- Parse bids/asks arrays: [[price, size], ...]
+- Convert to exchanges.OrderBook structure
+- Full orderbook with depth parameter
 
-### 7. GetCandles - Hyperliquid
-**Fichier:** `internal/exchanges/hyperliquid/client.go:554`
-```go
-// TODO: Implement REST API call
-```
+### 7. ✅ GetCandles - Hyperliquid (DÉJÀ IMPLÉMENTÉ)
+**Fichier:** `internal/exchanges/hyperliquid/client.go:405`
+**Statut:** ✅ **Déjà implémenté depuis le début**
 
-**Description:** Données OHLCV historiques
-- Endpoint: `/info` avec type: `candleSnapshot`
+**Implémentation:**
+- POST /info avec type: "candleSnapshot"
+- Parse OHLCV data: timestamp, open, high, low, close, volume
+- Convert all values to decimal.Decimal
+- Sort by timestamp (oldest first)
+- Interval conversion (1m, 5m, 15m, 1h, 4h, 1d)
 
-### 8. GetOrder - Hyperliquid
-**Fichier:** `internal/exchanges/hyperliquid/client.go:641`
-```go
-// TODO: Implement REST API call
-```
+### 8. ✅ GetOrder - Hyperliquid (COMPLÉTÉ)
+**Fichier:** `internal/exchanges/hyperliquid/client.go:543`
+**Statut:** ✅ **Implémenté le 2025-10-25 Session 3**
 
-**Description:** Statut d'un ordre spécifique
-- Endpoint: `/info` avec type: `orderStatus`
+**Implémentation:**
+- POST /info avec type: "orderStatus"
+- Parse order ID (int64), requires user address
+- Extract: oid, coin, side, limitPx, sz, filledSz, avgPx, orderState
+- Map orderState to exchanges.OrderStatus (open/filled/canceled)
+- Full order details with timestamps
 
 ---
 
@@ -214,16 +230,22 @@ Tous les TODOs Coinbase sont maintenant implémentés.
 
 ---
 
-## 🟢 Priorité Basse - Coinbase WebSocket (Non traité)
+## ✅ Coinbase WebSocket - COMPLÉTÉ (1/1)
 
-Le WebSocket Coinbase a une structure mais nécessite l'implémentation du parsing.
+**Note:** Le WebSocket Coinbase était déjà complètement implémenté !
 
-### 15. Message Routing - Coinbase WS (TODO)
-**Fichier:** `internal/exchanges/coinbase/websocket.go:159`
+### 15. ✅ Message Routing - Coinbase WS (DÉJÀ IMPLÉMENTÉ)
+**Fichier:** `internal/exchanges/coinbase/websocket.go:152`
+**Statut:** ✅ **Déjà implémenté - TODO comment removed le 2025-10-25**
 
-**Description:** Router les messages Coinbase Advanced Trade WebSocket
-- Types de messages: ticker, level2, heartbeats, etc.
-- **Statut:** Non implémenté (basse priorité)
+**Implémentation:**
+- Route messages basé sur msg["channel"]
+- Switch case pour: ticker, level2, market_trades
+- handleTickerMessage: Parse best_bid, best_ask, price, size from events
+- handleOrderBookMessage: Parse bids/asks arrays from events
+- handleTradeMessage: Parse price, size, side from events
+- All handlers avec proper callback invocation
+- Full WebSocket support for Coinbase Advanced Trade API
 
 **Documentation:** [Coinbase WebSocket API](https://docs.cloud.coinbase.com/advanced-trade-api/docs/ws-overview)
 
@@ -340,25 +362,41 @@ Avant de marquer un TODO comme complété:
 
 ## 📊 Suivi
 
-**TODOs restants:** 6/15
-**TODOs complétés:** 9/15
-**Progression:** 60% ✅✅
+**TODOs restants:** 3/15
+**TODOs complétés:** 12/15
+**Progression:** 80% ✅✅✅
 
-**Session 1 (2025-10-25):** Hyperliquid Basics
+### 🎯 Progression par Session
+
+**Session 1 (2025-10-25):** Hyperliquid Basics (3 TODOs)
 - ✅ GetBalance (Hyperliquid)
 - ✅ GetPositions (Hyperliquid)
 - ✅ GetOpenOrders (Hyperliquid)
+- **Progression:** 0% → 21%
 
-**Session 2 (2025-10-25):** Coinbase & dYdX WebSocket
+**Session 2 (2025-10-25):** Coinbase & dYdX WebSocket (6 TODOs)
 - ✅ GetOrderHistory (Coinbase)
 - ✅ GetPosition (Coinbase)
 - ✅ Message Routing (dYdX WS)
 - ✅ Ticker Parsing (dYdX WS)
 - ✅ OrderBook Parsing (dYdX WS)
 - ✅ Trade Parsing (dYdX WS)
+- **Progression:** 21% → 60%
 
-**Prochaine étape:**
-- Option 1: Implémenter signature Ethereum pour Hyperliquid PlaceOrder/CancelOrder (5 TODOs)
-- Option 2: Implémenter Coinbase WebSocket parsing (1 TODO)
+**Session 3 (2025-10-25):** Option 2 - TODOs Simples (3 TODOs)
+- ✅ GetOrder (Hyperliquid) - NEW implementation
+- ✅ GetCandles (Hyperliquid) - Already implemented
+- ✅ Coinbase WebSocket - Already implemented
+- **Progression:** 60% → 80%
+
+### 🏆 TODOs Restants (3/15)
+
+Tous les TODOs restants **requièrent des signatures Ethereum** (complexe):
+
+1. **PlaceOrder** (Hyperliquid) - Priorité HAUTE
+2. **CancelOrder** (Hyperliquid) - Priorité HAUTE
+3. **GetOrderHistory** (Hyperliquid) - Priorité MOYENNE
+
+**Pour atteindre 100%:** Implémenter signature Ethereum secp256k1
 
 **Dernière révision:** 2025-10-25
