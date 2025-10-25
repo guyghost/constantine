@@ -290,55 +290,35 @@ func (c *Client) SubscribeTrades(ctx context.Context, symbol string, callback fu
 }
 
 // PlaceOrder places a new order
-// ⚠️ WARNING: NOT IMPLEMENTED - Returns simulated data only!
-// This function does NOT place any real orders on dYdX.
+// ⚠️ WARNING: NOT IMPLEMENTED - dYdX v4 requires blockchain transactions for order placement
+// This requires a full node client implementation which is not yet available.
 // DO NOT USE in production - orders will appear successful but nothing will execute.
 func (c *Client) PlaceOrder(ctx context.Context, order *exchanges.Order) (*exchanges.Order, error) {
-	// TODO: Implement dYdX v4 order placement API
-	// This is a STUB implementation that returns fake data
-	fmt.Printf("⚠️  WARNING: PlaceOrder is NOT IMPLEMENTED - no real order placed for %s\n", order.Symbol)
-
-	order.ID = fmt.Sprintf("DYDX-FAKE-%d", time.Now().Unix())
-	order.Status = exchanges.OrderStatusOpen
-	order.CreatedAt = time.Now()
-	order.UpdatedAt = time.Now()
-	return order, nil
+	return nil, fmt.Errorf("PlaceOrder not implemented for dYdX v4 - requires blockchain transaction support")
 }
 
 // CancelOrder cancels an existing order
-// ⚠️ WARNING: NOT IMPLEMENTED - Returns success without canceling anything!
-// This function does NOT cancel any real orders on dYdX.
+// ⚠️ WARNING: NOT IMPLEMENTED - dYdX v4 requires blockchain transactions for order cancellation
 func (c *Client) CancelOrder(ctx context.Context, orderID string) error {
-	// TODO: Implement dYdX v4 order cancellation API
-	fmt.Printf("⚠️  WARNING: CancelOrder is NOT IMPLEMENTED - no order canceled: %s\n", orderID)
-	return nil
+	return fmt.Errorf("CancelOrder not implemented for dYdX v4 - requires blockchain transaction support")
 }
 
 // GetOrder retrieves order details
-// ⚠️ WARNING: NOT IMPLEMENTED - Always returns nil!
-// This function does NOT retrieve real order data from dYdX.
+// ⚠️ WARNING: NOT IMPLEMENTED - dYdX v4 indexer API may not provide individual order queries
 func (c *Client) GetOrder(ctx context.Context, orderID string) (*exchanges.Order, error) {
-	// TODO: Implement dYdX v4 get order API
-	fmt.Printf("⚠️  WARNING: GetOrder is NOT IMPLEMENTED - cannot retrieve order: %s\n", orderID)
-	return nil, nil
+	return nil, fmt.Errorf("GetOrder not implemented for dYdX v4 - indexer API limitations")
 }
 
 // GetOpenOrders retrieves all open orders
-// ⚠️ WARNING: NOT IMPLEMENTED - Always returns empty list!
-// This function does NOT retrieve real orders from dYdX.
+// ⚠️ WARNING: NOT IMPLEMENTED - dYdX v4 indexer API may not provide open orders queries
 func (c *Client) GetOpenOrders(ctx context.Context, symbol string) ([]exchanges.Order, error) {
-	// TODO: Implement dYdX v4 get open orders API
-	fmt.Printf("⚠️  WARNING: GetOpenOrders is NOT IMPLEMENTED for %s\n", symbol)
-	return []exchanges.Order{}, nil
+	return nil, fmt.Errorf("GetOpenOrders not implemented for dYdX v4 - indexer API limitations")
 }
 
 // GetOrderHistory retrieves order history
-// ⚠️ WARNING: NOT IMPLEMENTED - Always returns empty list!
-// This function does NOT retrieve real order history from dYdX.
+// ⚠️ WARNING: NOT IMPLEMENTED - dYdX v4 indexer API may not provide order history queries
 func (c *Client) GetOrderHistory(ctx context.Context, symbol string, limit int) ([]exchanges.Order, error) {
-	// TODO: Implement dYdX v4 get order history API
-	fmt.Printf("⚠️  WARNING: GetOrderHistory is NOT IMPLEMENTED for %s\n", symbol)
-	return []exchanges.Order{}, nil
+	return nil, fmt.Errorf("GetOrderHistory not implemented for dYdX v4 - indexer API limitations")
 }
 
 // GetBalance retrieves account balance

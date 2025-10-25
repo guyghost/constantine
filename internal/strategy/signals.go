@@ -1,6 +1,8 @@
 package strategy
 
 import (
+	"fmt"
+
 	"github.com/guyghost/constantine/internal/exchanges"
 	"github.com/shopspring/decimal"
 )
@@ -46,8 +48,13 @@ func (sg *SignalGenerator) GenerateSignal(
 	volumes []decimal.Decimal,
 	orderbook *exchanges.OrderBook,
 ) *Signal {
+	// Validate inputs
+	if err := sg.validateInputs(symbol, prices, volumes); err != nil {
+		return &Signal{Type: SignalTypeNone, Reason: "Input validation failed: " + err.Error()}
+	}
+
 	if len(prices) < sg.config.LongEMAPeriod {
-		return &Signal{Type: SignalTypeNone}
+		return &Signal{Type: SignalTypeNone, Reason: "Insufficient price data for indicators"}
 	}
 
 	// Calculate indicators
@@ -56,13 +63,18 @@ func (sg *SignalGenerator) GenerateSignal(
 	rsi := RSI(prices, sg.config.RSIPeriod)
 
 	if len(shortEMA) == 0 || len(longEMA) == 0 || len(rsi) == 0 {
-		return &Signal{Type: SignalTypeNone}
+		return &Signal{Type: SignalTypeNone, Reason: "Failed to calculate indicators"}
 	}
 
 	currentShortEMA := shortEMA[len(shortEMA)-1]
 	currentLongEMA := longEMA[len(longEMA)-1]
 	currentRSI := rsi[len(rsi)-1]
 	currentPrice := prices[len(prices)-1]
+
+	// Validate calculated values
+	if err := sg.validateCalculatedValues(currentPrice, currentShortEMA, currentLongEMA, currentRSI); err != nil {
+		return &Signal{Type: SignalTypeNone, Reason: "Calculated values validation failed: " + err.Error()}
+	}
 
 	// Check for buy signal
 	if sg.isBuySignal(currentShortEMA, currentLongEMA, currentRSI, orderbook) {
@@ -91,6 +103,67 @@ func (sg *SignalGenerator) GenerateSignal(
 	}
 
 	return &Signal{Type: SignalTypeNone}
+}
+
+// validateInputs validates the input parameters for signal generation
+func (sg *SignalGenerator) validateInputs(symbol string, prices, volumes []decimal.Decimal) error {
+	if symbol == "" {
+		return fmt.Errorf("symbol cannot be empty")
+	}
+
+	if len(prices) == 0 {
+		return fmt.Errorf("prices slice cannot be empty")
+	}
+
+	if len(prices) != len(volumes) {
+		return fmt.Errorf("prices and volumes slices must have the same length")
+	}
+
+	// Validate price values
+	for i, price := range prices {
+		if price.IsZero() || price.IsNegative() {
+			return fmt.Errorf("invalid price at index %d: %s", i, price.String())
+		}
+		if price.GreaterThan(sg.config.MaxPrice) || price.LessThan(sg.config.MinPrice) {
+			return fmt.Errorf("price out of valid range at index %d: %s", i, price.String())
+		}
+	}
+
+	// Validate volume values
+	for i, volume := range volumes {
+		if volume.IsNegative() {
+			return fmt.Errorf("invalid volume at index %d: %s", i, volume.String())
+		}
+	}
+
+	return nil
+}
+
+// validateCalculatedValues validates the calculated indicator values
+func (sg *SignalGenerator) validateCalculatedValues(price, shortEMA, longEMA, rsi decimal.Decimal) error {
+	// Check for invalid values
+	if !price.IsPositive() {
+		return fmt.Errorf("invalid price: %s", price.String())
+	}
+
+	if !shortEMA.IsPositive() {
+		return fmt.Errorf("invalid short EMA: %s", shortEMA.String())
+	}
+
+	if !longEMA.IsPositive() {
+		return fmt.Errorf("invalid long EMA: %s", longEMA.String())
+	}
+
+	if rsi.IsNegative() || rsi.GreaterThan(decimal.NewFromInt(100)) {
+		return fmt.Errorf("invalid RSI: %s", rsi.String())
+	}
+
+	// Check for reasonable ranges
+	if price.GreaterThan(sg.config.MaxPrice) || price.LessThan(sg.config.MinPrice) {
+		return fmt.Errorf("price out of configured range: %s", price.String())
+	}
+
+	return nil
 }
 
 // isBuySignal checks if current conditions indicate a buy signal
@@ -192,10 +265,10 @@ func (sg *SignalGenerator) calculateSignalStrength(
 	var rsiStrength float64
 	if isBuy {
 		// For buy: the lower the RSI, the stronger the signal
-		rsiStrength = (30.0 - rsiFloat) / 30.0 * 0.6
+		rsiStrength = (sg.config.RSIOversold - rsiFloat) / sg.config.RSIOversold * 0.6
 	} else {
 		// For sell: the higher the RSI, the stronger the signal
-		rsiStrength = (rsiFloat - 70.0) / 30.0 * 0.6
+		rsiStrength = (rsiFloat - sg.config.RSIOverbought) / (100.0 - sg.config.RSIOverbought) * 0.6
 	}
 
 	if rsiStrength < 0 {

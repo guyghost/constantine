@@ -88,10 +88,12 @@ func main() {
 func run() error {
 	// Create context with cancellation
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var wg sync.WaitGroup
 
 	appConfig, err := config.Load()
 	if err != nil {
+		cancel()
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
@@ -324,7 +326,8 @@ func setupCallbacks(
 
 		// Record trade in risk manager if filled
 		if update.Event == order.OrderEventFilled {
-			// TODO: Calculate PnL and record trade
+			// Calculate PnL and record trade
+			calculateAndRecordPnL(update, orderManager, riskManager)
 		}
 	})
 
@@ -472,4 +475,61 @@ func logAggregatedStatus(
 		fields = append(fields, "blocked_reason", reason)
 	}
 	log.Info("risk status", fields...)
+}
+
+// calculateAndRecordPnL calculates PnL for filled orders and records trades
+func calculateAndRecordPnL(update *order.OrderUpdate, orderManager *order.Manager, riskManager *risk.Manager) {
+	filledOrder := update.Order
+
+	// Get current positions to determine if this closes a position
+	positions := orderManager.GetPositions()
+
+	// Find if this order closes an existing position
+	for _, pos := range positions {
+		if pos.Symbol == filledOrder.Symbol {
+			// Check if order side closes the position
+			orderClosesPosition := false
+			if (filledOrder.Side == exchanges.OrderSideSell && pos.Side == order.PositionSideLong) ||
+				(filledOrder.Side == exchanges.OrderSideBuy && pos.Side == order.PositionSideShort) {
+				orderClosesPosition = true
+			}
+
+			if orderClosesPosition {
+				// Calculate PnL for closed position
+				var pnl decimal.Decimal
+				if pos.Side == order.PositionSideLong {
+					// Long position closed by sell order
+					pnl = filledOrder.Price.Sub(pos.EntryPrice).Mul(pos.Amount)
+				} else {
+					// Short position closed by buy order
+					pnl = pos.EntryPrice.Sub(filledOrder.Price).Mul(pos.Amount)
+				}
+
+				// Record the trade
+				tradeResult := risk.TradeResult{
+					Timestamp:  update.Timestamp,
+					Symbol:     filledOrder.Symbol,
+					Side:       filledOrder.Side,
+					EntryPrice: pos.EntryPrice,
+					ExitPrice:  filledOrder.Price,
+					Amount:     pos.Amount,
+					PnL:        pnl,
+					IsWin:      pnl.GreaterThan(decimal.Zero),
+				}
+
+				riskManager.RecordTrade(tradeResult)
+
+				botLogger().Info("trade recorded",
+					"symbol", filledOrder.Symbol,
+					"side", filledOrder.Side,
+					"entry_price", pos.EntryPrice.StringFixed(2),
+					"exit_price", filledOrder.Price.StringFixed(2),
+					"amount", pos.Amount.StringFixed(4),
+					"pnl", pnl.StringFixed(2),
+					"is_win", tradeResult.IsWin,
+				)
+				break
+			}
+		}
+	}
 }

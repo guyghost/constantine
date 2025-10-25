@@ -44,13 +44,21 @@ jobs:
         with:
           export-env: false
 
-      - name: Run tests
-        run: |
-          if [ -n "${OP_SERVICE_ACCOUNT_TOKEN}" ]; then
-            op run --env-file .env.op.template -- go test ./...
-          else
-            go test ./...
-          fi
+       - name: Run tests
+         run: |
+           if [ -n "${OP_SERVICE_ACCOUNT_TOKEN}" ]; then
+             op run --env-file .env.op.template -- go test ./... -coverprofile=coverage.out
+           else
+             go test ./... -coverprofile=coverage.out
+           fi
+
+       - name: Upload coverage to Codecov
+         uses: codecov/codecov-action@v4
+         with:
+           file: ./coverage.out
+           flags: unittests
+           name: codecov-umbrella
+           fail_ci_if_error: false
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
