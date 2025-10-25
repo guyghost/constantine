@@ -1,5 +1,24 @@
 # Constantine Trading Bot
 
+> **⚠️ AVERTISSEMENT CRITIQUE - LECTURE OBLIGATOIRE**
+>
+> **CE BOT N'EST PAS PRÊT POUR LE TRADING EN PRODUCTION**
+>
+> - **14 fonctionnalités critiques** ne sont pas implémentées (voir [docs/TODO.md](docs/TODO.md))
+> - **Aucun exchange ne peut trader automatiquement** actuellement
+> - **dYdX**: Données réelles mais trading en mode lecture seule uniquement
+> - **Hyperliquid/Coinbase**: Données simulées uniquement
+>
+> **Utilisez ce bot uniquement pour:**
+> - ✅ Backtesting de stratégies
+> - ✅ Observation des marchés (dYdX)
+> - ✅ Développement et tests
+>
+> **NE PAS utiliser pour du trading automatique réel!**
+> Voir [EXCHANGE_STATUS.md](docs/EXCHANGE_STATUS.md) pour les détails complets.
+
+---
+
 Constantine est un bot de trading multi-agent pour les marchés de cryptomonnaies, construit avec une architecture modulaire permettant d'intégrer facilement différents exchanges. Le cœur du projet s'articule désormais autour d'un agrégateur multi-exchange, d'un moteur de stratégie temps réel et d'agents dédiés à l'exécution, au risque et à la télémétrie.
 
 ## 🎯 Caractéristiques

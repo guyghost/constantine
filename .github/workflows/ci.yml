@@ -18,7 +18,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: '1.24'
           cache: true
 
       - name: Verify gofmt
@@ -44,21 +44,21 @@ jobs:
         with:
           export-env: false
 
-       - name: Run tests
-         run: |
-           if [ -n "${OP_SERVICE_ACCOUNT_TOKEN}" ]; then
-             op run --env-file .env.op.template -- go test ./... -coverprofile=coverage.out
-           else
-             go test ./... -coverprofile=coverage.out
-           fi
+      - name: Run tests
+        run: |
+          if [ -n "${OP_SERVICE_ACCOUNT_TOKEN}" ]; then
+            op run --env-file .env.op.template -- go test ./... -coverprofile=coverage.out
+          else
+            go test ./... -coverprofile=coverage.out
+          fi
 
-       - name: Upload coverage to Codecov
-         uses: codecov/codecov-action@v4
-         with:
-           file: ./coverage.out
-           flags: unittests
-           name: codecov-umbrella
-           fail_ci_if_error: false
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.out
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
