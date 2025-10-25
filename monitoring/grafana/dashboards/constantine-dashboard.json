@@ -1,0 +1,189 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Constantine Trading Bot Dashboard",
+    "tags": ["trading", "constantine", "cryptocurrency"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Trading Activity Overview",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(rate(constantine_orders_total[5m]))",
+            "legendFormat": "Orders/min"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            }
+          }
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": 2,
+        "title": "Orders by Symbol and Side",
+        "type": "barchart",
+        "targets": [
+          {
+            "expr": "sum by (symbol, side) (constantine_orders_total)",
+            "legendFormat": "{{symbol}} {{side}}"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 0
+        }
+      },
+      {
+        "id": 3,
+        "title": "Order Rate Over Time",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum(rate(constantine_orders_total[5m])) by (symbol)",
+            "legendFormat": "{{symbol}}"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 24,
+          "x": 0,
+          "y": 8
+        }
+      },
+      {
+        "id": 4,
+        "title": "Risk Management Triggers",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "constantine_stop_loss_total",
+            "legendFormat": "Stop Loss"
+          },
+          {
+            "expr": "constantine_take_profit_total",
+            "legendFormat": "Take Profit"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 16
+        }
+      },
+      {
+        "id": 5,
+        "title": "System Health",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "up{job=\"constantine-bot\"}",
+            "legendFormat": "Bot Status"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {
+                "options": {
+                  "0": {
+                    "text": "DOWN",
+                    "color": "red"
+                  },
+                  "1": {
+                    "text": "UP",
+                    "color": "green"
+                  }
+                },
+                "type": "value"
+              }
+            ]
+          }
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 12,
+          "y": 16
+        }
+      },
+      {
+        "id": 6,
+        "title": "Callback Panics",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "constantine_callback_panics_total",
+            "legendFormat": "Panics"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 18,
+          "y": 16
+        }
+      },
+      {
+        "id": 7,
+        "title": "System Resources",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "100 - (avg by (instance) (irate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
+            "legendFormat": "CPU Usage %"
+          },
+          {
+            "expr": "(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100",
+            "legendFormat": "Memory Usage %"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 24,
+          "x": 0,
+          "y": 24
+        }
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "timepicker": {},
+    "templating": {
+      "list": []
+    },
+    "annotations": {
+      "list": []
+    },
+    "refresh": "5s",
+    "schemaVersion": 27,
+    "version": 0,
+    "links": []
+  }
+}
