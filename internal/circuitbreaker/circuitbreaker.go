@@ -14,9 +14,9 @@ import (
 type State int
 
 const (
-	StateClosed State = iota // Normal operation
-	StateOpen                // Failing, reject requests
-	StateHalfOpen            // Testing if service recovered
+	StateClosed   State = iota // Normal operation
+	StateOpen                  // Failing, reject requests
+	StateHalfOpen              // Testing if service recovered
 )
 
 func (s State) String() string {

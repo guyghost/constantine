@@ -23,8 +23,8 @@ type Config struct {
 	CooldownPeriod       time.Duration   // Cooldown period after consecutive losses
 	ConsecutiveLossLimit int             // Number of consecutive losses to trigger cooldown
 	// Position correlation limits
-	MaxExposurePerSymbol decimal.Decimal // Maximum exposure per symbol as percentage of balance (default: 30%)
-	MaxSameSymbolPositions int           // Maximum number of positions for the same symbol (default: 2)
+	MaxExposurePerSymbol   decimal.Decimal // Maximum exposure per symbol as percentage of balance (default: 30%)
+	MaxSameSymbolPositions int             // Maximum number of positions for the same symbol (default: 2)
 }
 
 // DefaultConfig returns default risk management configuration

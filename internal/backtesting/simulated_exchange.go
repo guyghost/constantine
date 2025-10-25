@@ -10,9 +10,9 @@ import (
 
 // SimulatedExchange simulates an exchange for backtesting
 type SimulatedExchange struct {
-	data          *HistoricalData
-	config        *BacktestConfig
-	currentIndex  int
+	data         *HistoricalData
+	config       *BacktestConfig
+	currentIndex int
 }
 
 // NewSimulatedExchange creates a new simulated exchange
@@ -94,7 +94,7 @@ func (s *SimulatedExchange) GetCandles(ctx context.Context, symbol string, inter
 		start = 0
 	}
 
-	return s.data.Candles[start:s.currentIndex+1], nil
+	return s.data.Candles[start : s.currentIndex+1], nil
 }
 
 // SubscribeTicker not implemented for simulated exchange
