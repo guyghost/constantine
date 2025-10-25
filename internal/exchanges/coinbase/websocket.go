@@ -156,7 +156,8 @@ func (ws *WebSocketClient) processMessage(message []byte) {
 		return
 	}
 
-	// TODO: Implement proper message routing based on Coinbase's protocol
+	// Route messages based on Coinbase Advanced Trade WebSocket protocol
+	// Supported channels: ticker, level2, market_trades
 	channel, ok := msg["channel"].(string)
 	if !ok {
 		return

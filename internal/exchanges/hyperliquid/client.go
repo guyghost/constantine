@@ -524,10 +524,100 @@ func (c *Client) CancelOrder(ctx context.Context, orderID string) error {
 	return nil
 }
 
+// HyperliquidOrderStatusResponse represents the response from order status API
+type HyperliquidOrderStatusResponse struct {
+	Status struct {
+		Oid        int64  `json:"oid"`
+		Coin       string `json:"coin"`
+		Side       string `json:"side"`
+		LimitPx    string `json:"limitPx"`
+		Sz         string `json:"sz"`
+		Timestamp  int64  `json:"timestamp"`
+		FilledSz   string `json:"filledSz,omitempty"`
+		AvgPrice   string `json:"avgPx,omitempty"`
+		OrderState string `json:"orderState"` // "open", "filled", "canceled", etc.
+	} `json:"status"`
+}
+
 // GetOrder retrieves order details
 func (c *Client) GetOrder(ctx context.Context, orderID string) (*exchanges.Order, error) {
-	// TODO: Implement REST API call
-	return nil, nil
+	if c.apiKey == "" {
+		return nil, fmt.Errorf("hyperliquid requires an ethereum address (set as API key) to query order status")
+	}
+
+	// Parse order ID to int64
+	oid, err := strconv.ParseInt(orderID, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid order ID format: %w", err)
+	}
+
+	request := map[string]any{
+		"type": "orderStatus",
+		"user": c.apiKey,
+		"oid":  oid,
+	}
+
+	var response HyperliquidOrderStatusResponse
+	err = c.httpClient.doRequest(ctx, "POST", "/info", request, &response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get order: %w", err)
+	}
+
+	orderStatus := response.Status
+
+	// Parse order details
+	order := &exchanges.Order{
+		ID:        fmt.Sprintf("%d", orderStatus.Oid),
+		Symbol:    orderStatus.Coin + "-USD",
+		CreatedAt: time.UnixMilli(orderStatus.Timestamp),
+		UpdatedAt: time.Now(),
+	}
+
+	// Parse side
+	if orderStatus.Side == "B" || orderStatus.Side == "buy" {
+		order.Side = exchanges.OrderSideBuy
+	} else {
+		order.Side = exchanges.OrderSideSell
+	}
+
+	// Parse price and amount
+	if price, err := decimal.NewFromString(orderStatus.LimitPx); err == nil {
+		order.Price = price
+	}
+	if size, err := decimal.NewFromString(orderStatus.Sz); err == nil {
+		order.Amount = size
+	}
+
+	// Parse filled amount
+	if orderStatus.FilledSz != "" {
+		if filled, err := decimal.NewFromString(orderStatus.FilledSz); err == nil {
+			order.FilledAmount = filled
+		}
+	}
+
+	// Parse average price
+	if orderStatus.AvgPrice != "" {
+		if avgPx, err := decimal.NewFromString(orderStatus.AvgPrice); err == nil {
+			order.AveragePrice = avgPx
+		}
+	}
+
+	// Map order state to status
+	switch orderStatus.OrderState {
+	case "open":
+		order.Status = exchanges.OrderStatusOpen
+	case "filled":
+		order.Status = exchanges.OrderStatusFilled
+	case "canceled", "cancelled":
+		order.Status = exchanges.OrderStatusCanceled
+	default:
+		order.Status = exchanges.OrderStatusOpen // Default to open
+	}
+
+	// Order type is limit (Hyperliquid primarily uses limit orders)
+	order.Type = exchanges.OrderTypeLimit
+
+	return order, nil
 }
 
 // HyperliquidOpenOrdersResponse represents the response from open orders API
