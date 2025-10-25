@@ -8,15 +8,27 @@ Ce document liste tous les TODOs dans le code avec leurs emplacements exacts et 
 
 | Catégorie | Nombre | Complétés | Priorité | Statut |
 |-----------|--------|-----------|----------|--------|
-| dYdX WebSocket | 4 | 0 | 🟡 Moyenne | Non démarré |
+| dYdX WebSocket | 4 | 4 | 🟡 Moyenne | ✅ **COMPLÉTÉ (100%)** |
 | Hyperliquid Trading | 8 | 3 | 🔴 Haute | 🟢 **En cours (38%)** |
-| Coinbase Trading | 2 | 0 | 🟡 Moyenne | Non démarré |
-| **TOTAL** | **14** | **3** | - | **21% complété** |
+| Coinbase Trading | 2 | 2 | 🟡 Moyenne | ✅ **COMPLÉTÉ (100%)** |
+| **TOTAL** | **14** | **9** | - | **64% complété** ✅ |
 
-### 🎉 Dernières implémentations (2025-10-25)
-- ✅ GetBalance (Hyperliquid) - Récupération balance réelle
-- ✅ GetPositions (Hyperliquid) - Récupération positions avec PnL
-- ✅ GetOpenOrders (Hyperliquid) - Liste des ordres ouverts
+### 🎉 Dernières implémentations (2025-10-25 Session 2)
+
+**Coinbase (2/2 complétés):**
+- ✅ GetOrderHistory - Historique des ordres via API Coinbase
+- ✅ GetPosition - Récupération position par symbole
+
+**dYdX WebSocket (4/4 complétés):**
+- ✅ Message routing - Routing déjà fonctionnel
+- ✅ Ticker parsing - Parsing oraclePrice, volume24H
+- ✅ OrderBook parsing - Parsing bids/asks arrays
+- ✅ Trade parsing - Parsing trades avec price/size/side
+
+**Hyperliquid (3/8 complétés - Session 1):**
+- ✅ GetBalance - Récupération balance réelle
+- ✅ GetPositions - Récupération positions avec PnL
+- ✅ GetOpenOrders - Liste des ordres ouverts
 
 ---
 
@@ -126,90 +138,94 @@ Ces fonctions sont nécessaires pour avoir des données de marché réelles.
 
 ---
 
-## 🟡 Priorité Moyenne - dYdX WebSocket
+## ✅ dYdX WebSocket - COMPLÉTÉ (4/4)
 
-Ces TODOs concernent le parsing des messages WebSocket dYdX. Le WebSocket est déjà connecté, mais les messages ne sont pas parsés correctement.
+Tous les TODOs WebSocket dYdX sont maintenant implémentés avec parsing complet.
 
-### 9. Message Routing - dYdX WS
+### 9. ✅ Message Routing - dYdX WS (COMPLÉTÉ)
 **Fichier:** `internal/exchanges/dydx/websocket.go:130`
-```go
-// TODO: Implement proper message routing based on dYdX's protocol
-```
+**Statut:** ✅ **Implémenté le 2025-10-25**
 
-**Description:** Router les messages WebSocket vers les bons handlers
-- Identifier le type de message (ticker, orderbook, trades, etc.)
-- Dispatcher vers le handler approprié
+**Implémentation:**
+- Routing déjà fonctionnel basé sur msg["type"] et msg["channel"]
+- Switch case pour v4_markets, v4_orderbook, v4_trades
+- Removed TODO comment, code is production-ready
 
-**Documentation:** [dYdX WebSocket Protocol](https://docs.dydx.exchange/developers/indexer/indexer_websocket)
+### 10. ✅ Ticker Parsing - dYdX WS (COMPLÉTÉ)
+**Fichier:** `internal/exchanges/dydx/websocket.go:158`
+**Statut:** ✅ **Implémenté le 2025-10-25**
 
-### 10. Ticker Parsing - dYdX WS
-**Fichier:** `internal/exchanges/dydx/websocket.go:159`
-```go
-// TODO: Parse ticker data according to dYdX format
-```
+**Implémentation:**
+- Parse dYdX v4 format avec oraclePrice comme last price
+- Extract volume24H from trades24H field
+- Approximate bid/ask from oracle price
+- Proper decimal parsing avec error handling
+- Invoke callbacks pour symbols enregistrés
 
-**Description:** Parser les données ticker du WebSocket
-- Format: `{"type": "channel_data", "channel": "v4_markets",...}`
-- Extraction: price, volume, high, low, etc.
+### 11. ✅ OrderBook Parsing - dYdX WS (COMPLÉTÉ)
+**Fichier:** `internal/exchanges/dydx/websocket.go:204`
+**Statut:** ✅ **Implémenté le 2025-10-25**
 
-### 11. OrderBook Parsing - dYdX WS
-**Fichier:** `internal/exchanges/dydx/websocket.go:184`
-```go
-// TODO: Parse order book data according to dYdX format
-```
+**Implémentation:**
+- Parse bids/asks arrays: [[price, size], ...]
+- Convert string values to decimal.Decimal
+- Build exchanges.OrderBook avec Bids et Asks levels
+- Support pour incremental updates
 
-**Description:** Parser les mises à jour du carnet d'ordres
-- Format: `{"type": "channel_data", "channel": "v4_orderbook",...}`
-- Gestion des updates incrémentaux
+### 12. ✅ Trade Parsing - dYdX WS (COMPLÉTÉ)
+**Fichier:** `internal/exchanges/dydx/websocket.go:272`
+**Statut:** ✅ **Implémenté le 2025-10-25**
 
-### 12. Trade Parsing - dYdX WS
-**Fichier:** `internal/exchanges/dydx/websocket.go:206`
-```go
-// TODO: Parse trade data according to dYdX format
-```
-
-**Description:** Parser les trades exécutés
-- Format: `{"type": "channel_data", "channel": "v4_trades",...}`
-- Extraction: price, size, side, timestamp
+**Implémentation:**
+- Parse trades array from contents
+- Extract price, size, side, createdAt timestamp
+- Convert side strings (BUY/SELL) to exchanges.OrderSide
+- Support multiple trades per message
+- RFC3339 timestamp parsing
 
 ---
 
-## 🟢 Priorité Basse - Coinbase WebSocket
+## ✅ Coinbase Trading - COMPLÉTÉ (2/2)
+
+Tous les TODOs Coinbase sont maintenant implémentés.
+
+**Note:** GetCandles et GetOrder étaient déjà implémentés. Les vrais TODOs étaient GetOrderHistory et GetPosition.
+
+### 13. ✅ GetOrderHistory - Coinbase (COMPLÉTÉ)
+**Fichier:** `internal/exchanges/coinbase/client.go:893`
+**Statut:** ✅ **Implémenté le 2025-10-25**
+
+**Implémentation:**
+- Endpoint: GET `/brokerage/orders/historical/batch?limit={limit}&product_id={symbol}`
+- Filtre automatique des ordres OPEN (gérés par GetOpenOrders)
+- Parse order configuration (market/limit types)
+- Extract filled amounts, average prices, timestamps
+- Support symbol filtering et limit parameter
+
+### 14. ✅ GetPosition - Coinbase (COMPLÉTÉ)
+**Fichier:** `internal/exchanges/coinbase/client.go:1064`
+**Statut:** ✅ **Implémenté le 2025-10-25**
+
+**Implémentation:**
+- Delegate à GetPositions() puis filtre par symbol
+- Proper pour spot trading (pas de leverage)
+- Returns error si aucune position trouvée pour le symbol
+- Efficient: évite code duplication
+
+---
+
+## 🟢 Priorité Basse - Coinbase WebSocket (Non traité)
 
 Le WebSocket Coinbase a une structure mais nécessite l'implémentation du parsing.
 
-### 13. Message Routing - Coinbase WS
+### 15. Message Routing - Coinbase WS (TODO)
 **Fichier:** `internal/exchanges/coinbase/websocket.go:159`
-```go
-// TODO: Implement proper message routing based on Coinbase's protocol
-```
 
 **Description:** Router les messages Coinbase Advanced Trade WebSocket
 - Types de messages: ticker, level2, heartbeats, etc.
+- **Statut:** Non implémenté (basse priorité)
 
 **Documentation:** [Coinbase WebSocket API](https://docs.cloud.coinbase.com/advanced-trade-api/docs/ws-overview)
-
----
-
-## 🟢 Priorité Basse - Coinbase Trading
-
-### 14. GetCandles - Coinbase
-**Fichier:** `internal/exchanges/coinbase/client.go:894`
-```go
-// TODO: Implement REST API call
-```
-
-**Description:** Données OHLCV Coinbase
-- Endpoint: `/api/v3/brokerage/products/{product_id}/candles`
-
-### 15. GetOrder - Coinbase
-**Fichier:** `internal/exchanges/coinbase/client.go:999`
-```go
-// TODO: Implement REST API call
-```
-
-**Description:** Statut d'un ordre
-- Endpoint: `/api/v3/brokerage/orders/historical/{order_id}`
 
 ---
 
@@ -324,15 +340,25 @@ Avant de marquer un TODO comme complété:
 
 ## 📊 Suivi
 
-**TODOs restants:** 11/14
-**TODOs complétés:** 3/14
-**Progression:** 21% ✅
+**TODOs restants:** 6/15
+**TODOs complétés:** 9/15
+**Progression:** 60% ✅✅
 
-**Dernière session:** 2025-10-25
+**Session 1 (2025-10-25):** Hyperliquid Basics
 - ✅ GetBalance (Hyperliquid)
 - ✅ GetPositions (Hyperliquid)
 - ✅ GetOpenOrders (Hyperliquid)
 
-**Prochaine étape:** Implémenter signature Ethereum pour PlaceOrder/CancelOrder
+**Session 2 (2025-10-25):** Coinbase & dYdX WebSocket
+- ✅ GetOrderHistory (Coinbase)
+- ✅ GetPosition (Coinbase)
+- ✅ Message Routing (dYdX WS)
+- ✅ Ticker Parsing (dYdX WS)
+- ✅ OrderBook Parsing (dYdX WS)
+- ✅ Trade Parsing (dYdX WS)
+
+**Prochaine étape:**
+- Option 1: Implémenter signature Ethereum pour Hyperliquid PlaceOrder/CancelOrder (5 TODOs)
+- Option 2: Implémenter Coinbase WebSocket parsing (1 TODO)
 
 **Dernière révision:** 2025-10-25
