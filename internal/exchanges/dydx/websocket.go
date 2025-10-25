@@ -127,7 +127,7 @@ func (ws *WebSocketClient) processMessage(message []byte) {
 		return
 	}
 
-	// TODO: Implement proper message routing based on dYdX's protocol
+	// Route messages based on dYdX v4 WebSocket protocol
 	msgType, ok := msg["type"].(string)
 	if !ok {
 		return
@@ -156,68 +156,180 @@ func (ws *WebSocketClient) processMessage(message []byte) {
 
 // handleTickerMessage handles ticker updates
 func (ws *WebSocketClient) handleTickerMessage(msg map[string]interface{}) {
-	// TODO: Parse ticker data according to dYdX format
 	ws.mu.RLock()
 	defer ws.mu.RUnlock()
+
+	// dYdX v4 format: {"type": "channel_data", "channel": "v4_markets", "id": "BTC-USD", "contents": {...}}
+	id, ok := msg["id"].(string)
+	if !ok {
+		return
+	}
 
 	contents, ok := msg["contents"].(map[string]interface{})
 	if !ok {
 		return
 	}
 
-	symbol, ok := contents["ticker"].(string)
-	if !ok {
-		return
+	// Extract ticker data from contents
+	// dYdX provides: oraclePrice, priceChange24H, trades24H, volume24H, etc.
+	ticker := &exchanges.Ticker{
+		Symbol:    id,
+		Timestamp: time.Now(),
 	}
 
-	if callback, exists := ws.tickerCallbacks[symbol]; exists {
-		ticker := &exchanges.Ticker{
-			Symbol:    symbol,
-			Timestamp: time.Now(),
+	// Parse oracle price (last price)
+	if oraclePrice, ok := contents["oraclePrice"].(string); ok {
+		if price, err := decimal.NewFromString(oraclePrice); err == nil {
+			ticker.Last = price
+			// Approximate bid/ask from oracle price (dYdX doesn't provide in ticker)
+			ticker.Bid = price.Sub(decimal.NewFromFloat(0.5))
+			ticker.Ask = price.Add(decimal.NewFromFloat(0.5))
 		}
+	}
+
+	// Parse 24h volume
+	if volume24h, ok := contents["trades24H"].(string); ok {
+		if vol, err := decimal.NewFromString(volume24h); err == nil {
+			ticker.Volume24h = vol
+		}
+	}
+
+	// Invoke callback if registered for this symbol
+	if callback, exists := ws.tickerCallbacks[id]; exists {
 		callback(ticker)
 	}
 }
 
 // handleOrderBookMessage handles order book updates
 func (ws *WebSocketClient) handleOrderBookMessage(msg map[string]interface{}) {
-	// TODO: Parse order book data according to dYdX format
 	ws.mu.RLock()
 	defer ws.mu.RUnlock()
 
+	// dYdX v4 format: {"type": "channel_data", "channel": "v4_orderbook", "id": "BTC-USD", "contents": {...}}
 	id, ok := msg["id"].(string)
 	if !ok {
 		return
 	}
 
-	if callback, exists := ws.orderbookCallbacks[id]; exists {
-		orderbook := &exchanges.OrderBook{
-			Symbol:    id,
-			Bids:      []exchanges.Level{},
-			Asks:      []exchanges.Level{},
-			Timestamp: time.Now(),
+	contents, ok := msg["contents"].(map[string]interface{})
+	if !ok {
+		return
+	}
+
+	orderbook := &exchanges.OrderBook{
+		Symbol:    id,
+		Bids:      []exchanges.Level{},
+		Asks:      []exchanges.Level{},
+		Timestamp: time.Now(),
+	}
+
+	// Parse bids: [[price, size], ...]
+	if bidsData, ok := contents["bids"].([]interface{}); ok {
+		for _, bidData := range bidsData {
+			if bidArray, ok := bidData.([]interface{}); ok && len(bidArray) >= 2 {
+				priceStr, ok1 := bidArray[0].(string)
+				sizeStr, ok2 := bidArray[1].(string)
+				if ok1 && ok2 {
+					price, err1 := decimal.NewFromString(priceStr)
+					size, err2 := decimal.NewFromString(sizeStr)
+					if err1 == nil && err2 == nil {
+						orderbook.Bids = append(orderbook.Bids, exchanges.Level{
+							Price:  price,
+							Amount: size,
+						})
+					}
+				}
+			}
 		}
+	}
+
+	// Parse asks: [[price, size], ...]
+	if asksData, ok := contents["asks"].([]interface{}); ok {
+		for _, askData := range asksData {
+			if askArray, ok := askData.([]interface{}); ok && len(askArray) >= 2 {
+				priceStr, ok1 := askArray[0].(string)
+				sizeStr, ok2 := askArray[1].(string)
+				if ok1 && ok2 {
+					price, err1 := decimal.NewFromString(priceStr)
+					size, err2 := decimal.NewFromString(sizeStr)
+					if err1 == nil && err2 == nil {
+						orderbook.Asks = append(orderbook.Asks, exchanges.Level{
+							Price:  price,
+							Amount: size,
+						})
+					}
+				}
+			}
+		}
+	}
+
+	// Invoke callback if registered for this symbol
+	if callback, exists := ws.orderbookCallbacks[id]; exists {
 		callback(orderbook)
 	}
 }
 
 // handleTradeMessage handles trade updates
 func (ws *WebSocketClient) handleTradeMessage(msg map[string]interface{}) {
-	// TODO: Parse trade data according to dYdX format
 	ws.mu.RLock()
 	defer ws.mu.RUnlock()
 
+	// dYdX v4 format: {"type": "channel_data", "channel": "v4_trades", "id": "BTC-USD", "contents": {...}}
 	id, ok := msg["id"].(string)
 	if !ok {
 		return
 	}
 
-	if callback, exists := ws.tradeCallbacks[id]; exists {
-		trade := &exchanges.Trade{
-			Symbol:    id,
-			Timestamp: time.Now(),
+	contents, ok := msg["contents"].(map[string]interface{})
+	if !ok {
+		return
+	}
+
+	// dYdX sends an array of recent trades
+	if tradesData, ok := contents["trades"].([]interface{}); ok {
+		for _, tradeData := range tradesData {
+			if tradeMap, ok := tradeData.(map[string]interface{}); ok {
+				trade := &exchanges.Trade{
+					Symbol:    id,
+					Timestamp: time.Now(),
+				}
+
+				// Parse price
+				if priceStr, ok := tradeMap["price"].(string); ok {
+					if price, err := decimal.NewFromString(priceStr); err == nil {
+						trade.Price = price
+					}
+				}
+
+				// Parse size/amount
+				if sizeStr, ok := tradeMap["size"].(string); ok {
+					if size, err := decimal.NewFromString(sizeStr); err == nil {
+						trade.Amount = size
+					}
+				}
+
+				// Parse side
+				if sideStr, ok := tradeMap["side"].(string); ok {
+					if sideStr == "BUY" || sideStr == "buy" {
+						trade.Side = exchanges.OrderSideBuy
+					} else {
+						trade.Side = exchanges.OrderSideSell
+					}
+				}
+
+				// Parse timestamp if available
+				if createdAt, ok := tradeMap["createdAt"].(string); ok {
+					if ts, err := time.Parse(time.RFC3339, createdAt); err == nil {
+						trade.Timestamp = ts
+					}
+				}
+
+				// Invoke callback if registered for this symbol
+				if callback, exists := ws.tradeCallbacks[id]; exists {
+					callback(trade)
+				}
+			}
 		}
-		callback(trade)
 	}
 }
 
