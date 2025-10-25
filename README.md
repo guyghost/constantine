@@ -1,28 +1,28 @@
 # Constantine Trading Bot
 
-Constantine est un bot de trading multi-agent pour les marchés de cryptomonnaies, construit avec une architecture modulaire permettant d'intégrer facilement différents exchanges.
+Constantine est un bot de trading multi-agent pour les marchés de cryptomonnaies, construit avec une architecture modulaire permettant d'intégrer facilement différents exchanges. Le cœur du projet s'articule désormais autour d'un agrégateur multi-exchange, d'un moteur de stratégie temps réel et d'agents dédiés à l'exécution, au risque et à la télémétrie.
 
 ## 🎯 Caractéristiques
 
-- **Multi-Exchange** : Support de dYdX v4, Hyperliquid, Coinbase
-- **Architecture Agent-Based** : Composants modulaires et découplés
-- **Stratégie de Scalping** : EMA, RSI, et Bollinger Bands
-- **Backtesting Framework** : Testez vos stratégies sur données historiques
-- **TUI & Headless Mode** : Interface terminal ou mode sans interface
-- **Gestion du risque** : Position sizing, stop loss, take profit
-- **WebSocket Real-time** : Données de marché en temps réel
+- **Multi-Exchange** : Agrégateur capable d'orchestrer dYdX v4, Hyperliquid, Coinbase
+- **Architecture Agent-Based** : Agents dédiés (stratégie, risque, exécution, TUI, télémétrie)
+- **Stratégie de Scalping** : EMA/RSI/Bollinger Bands avec seuils configurables via variables d'environnement
+- **Backtesting Framework** : Testez vos stratégies sur données historiques (CLI `cmd/backtest`)
+- **Agent d'exécution** : Gestion automatique des entrées/sorties avec stop loss & take profit
+- **TUI & Headless Mode** : Interface terminal (Bubble Tea) ou mode headless pour serveurs
+- **Gestion du risque** : Limites de positions, drawdown, cooldown, exposition par symbole
+- **Observabilité** : Export Prometheus (`/metrics`), endpoints de santé `/healthz` & `/readyz`
 
 ## 📊 État des Exchanges
 
 | Exchange | Statut | Authentification | Documentation |
 |----------|--------|------------------|---------------|
-| **dYdX v4** | ⚠️ **LECTURE SEULE** | Mnemonic | [Guide](docs/DYDX_INTEGRATION.md) |
-| Hyperliquid | 🔧 Demo Mode | À implémenter | - |
-| Coinbase | 🔧 Demo Mode | À implémenter | - |
+| **dYdX v4** | ✅ Temps réel (REST/WS) | ⚠️ Trading mock | Mnemonic (ou API key) | [Guide](docs/DYDX_INTEGRATION.md) |
+| Hyperliquid | 🔧 Mock data | 🔧 Mock | À implémenter | - |
+| Coinbase | 🔧 Mock data | 🔧 Mock | À implémenter | - |
 
 **⚠️ AVERTISSEMENT IMPORTANT** :
-- **dYdX** : Actuellement en mode **LECTURE SEULE**. Les fonctions de trading (PlaceOrder, CancelOrder) ne sont **PAS implémentées**.
-- Seules les données de marché en temps réel sont fonctionnelles.
+- **dYdX** : Les fonctions de trading (PlaceOrder, CancelOrder) retournent encore des mocks, même si les données de marché temps réel et les comptes sont fonctionnels.
 - **NE PAS UTILISER EN PRODUCTION** pour du trading automatique.
 
 Voir [EXCHANGE_STATUS.md](docs/EXCHANGE_STATUS.md) pour plus de détails.
@@ -33,6 +33,7 @@ Voir [EXCHANGE_STATUS.md](docs/EXCHANGE_STATUS.md) pour plus de détails.
 
 - Go 1.21+
 - Compte sur un exchange supporté (recommandé: dYdX)
+- Accès à un mnemonic dYdX (ou clés API) si vous activez l'exchange en temps réel
 
 ### Installation
 
@@ -44,7 +45,7 @@ cd constantine
 # Installer les dépendances
 go mod download
 
-# Compiler le bot
+# Compiler le bot multi-agent
 go build -o bin/constantine ./cmd/bot
 
 # Compiler l'outil de backtesting
@@ -56,22 +57,29 @@ go build -o bin/backtest ./cmd/backtest
 Créez un fichier `.env` à la racine :
 
 ```bash
-# Exchange selection (dydx recommandé)
-EXCHANGE=dydx
+# Activer les exchanges
+ENABLE_DYDX=true
+ENABLE_HYPERLIQUID=false
+ENABLE_COINBASE=false
 
-# Pour dYdX: utilisez votre mnemonic (12 ou 24 mots)
-EXCHANGE_API_SECRET="word1 word2 word3 ... word12"
+# Authentification dYdX (lecture seule)
+DYDX_MNEMONIC="word1 word2 ... word12"
+DYDX_SUBACCOUNT_NUMBER=0
 
 # Configuration de trading
 TRADING_SYMBOL=BTC-USD
 INITIAL_BALANCE=10000
 
-# Paramètres de stratégie
-SHORT_EMA_PERIOD=9
-LONG_EMA_PERIOD=21
-RSI_PERIOD=14
-TAKE_PROFIT_PERCENT=0.5
-STOP_LOSS_PERCENT=0.25
+# Paramètres de stratégie (override des valeurs par défaut)
+STRATEGY_SHORT_EMA=9
+STRATEGY_LONG_EMA=21
+STRATEGY_RSI_PERIOD=14
+STRATEGY_TAKE_PROFIT=0.5
+STRATEGY_STOP_LOSS=0.25
+
+# Observabilité
+TELEMETRY_ADDR=":9100"
+LOG_LEVEL=debug
 ```
 
 ⚠️ **Important** : Ajoutez `.env` à votre `.gitignore` !
@@ -82,9 +90,14 @@ STOP_LOSS_PERCENT=0.25
 # Mode headless (recommandé pour serveurs)
 ./bin/constantine --headless
 
-# Mode TUI (interface terminal)
+# Mode TUI (interface terminal Bubble Tea)
 ./bin/constantine
 ```
+
+> ℹ️ Le bot démarre un serveur de télémétrie si `TELEMETRY_ADDR` est défini :
+> - `/metrics` (Prometheus)
+> - `/healthz` (liveness)
+> - `/readyz` (readiness)
 
 ## 📖 Documentation
 
@@ -102,8 +115,8 @@ STOP_LOSS_PERCENT=0.25
 ### Fonctionnalités
 
 - [Backtesting Framework](docs/BACKTESTING.md)
-- [Gestion du risque](docs/RISK_MANAGEMENT.md) *(à venir)*
-- [Stratégies de trading](docs/STRATEGIES.md) *(à venir)*
+- [Gestion du risque](docs/EXCHANGE_STATUS.md#recommandations) *(résumé dans le manager de risque)*
+- [Architecture multi-agents](AGENTS.md)
 
 ## 🧪 Backtesting
 
@@ -133,7 +146,7 @@ Constantine utilise une architecture basée sur des agents autonomes :
 └───────────────┬─────────────────────────┘
                 │
 ┌───────────────┴─────────────────────────┐
-│         Exchange Agents                  │
+│    Agrégateur Multi-Exchange            │
 │  (dYdX, Hyperliquid, Coinbase)          │
 └───────────────┬─────────────────────────┘
                 │
@@ -143,8 +156,8 @@ Constantine utilise une architecture basée sur des agents autonomes :
 └───────────────┬─────────────────────────┘
                 │
 ┌───────────────┴─────────────────────────┐
-│      Order & Risk Management             │
-│  (Position sizing, SL/TP)               │
+│  Order / Risk / Execution Agents         │
+│  (SL/TP automatiques, validation risque) │
 └─────────────────────────────────────────┘
 ```
 
@@ -184,19 +197,22 @@ constantine/
 │   ├── bot/          # Application principale
 │   └── backtest/     # Outil de backtesting
 ├── internal/
-│   ├── exchanges/    # Adaptateurs exchanges
-│   │   ├── dydx/     # ✅ dYdX v4 (production ready)
-│   │   ├── hyperliquid/
-│   │   └── coinbase/
-│   ├── strategy/     # Stratégies de trading
-│   ├── order/        # Gestion des ordres
-│   ├── risk/         # Gestion du risque
-│   ├── tui/          # Interface terminal
-│   └── backtesting/  # Framework de backtesting
-├── docs/             # Documentation
-├── examples/         # Exemples de code
-├── scripts/          # Scripts utilitaires
-└── testdata/         # Données de test
+│   ├── exchanges/      # Adaptateurs exchanges + agrégateur multi-exchange
+│   ├── strategy/       # Stratégies de trading (scalping)
+│   ├── order/          # Gestion des ordres & positions
+│   ├── risk/           # Gestion du risque et exposure
+│   ├── execution/      # Agent d'exécution automatique
+│   ├── circuitbreaker/ # Protection contre les défaillances
+│   ├── ratelimit/      # Limiteurs de taux token bucket
+│   ├── telemetry/      # Serveur métriques & santé
+│   ├── tui/            # Interface terminal Bubble Tea
+│   ├── backtesting/    # Framework de backtesting
+│   ├── logger/         # Wrapper slog + configuration
+│   └── testutils/      # Helpers pour tests
+├── pkg/               # Packages réutilisables (utils, etc.)
+├── docs/              # Documentation détaillée
+├── scripts/           # Scripts utilitaires
+└── testdata/          # Données de test
 ```
 
 ## 🛠️ Développement
@@ -217,11 +233,12 @@ Voir `internal/exchanges/dydx/` comme référence.
 # Tests unitaires
 go test ./...
 
-# Test spécifique
+# Tests ciblés
 go test ./internal/backtesting/...
+go test ./internal/exchanges/... -run Test
 
-# Test d'intégration dYdX
-go run examples/dydx_mnemonic_example.go
+# Vérifier la télémétrie
+curl -sf http://localhost:9100/metrics
 ```
 
 ## 🤝 Contribution
@@ -241,8 +258,8 @@ Les contributions sont les bienvenues ! Pour contribuer :
 - [x] Support dYdX v4
 - [x] Framework de backtesting
 - [x] Authentification mnemonic
-- [ ] Trading automatique dYdX
-- [ ] Implémentation complète Hyperliquid
+- [ ] Trading automatique dYdX (REST v4)
+- [ ] Implémentation complète Hyperliquid (REST & signatures)
 
 ### Moyen terme
 
