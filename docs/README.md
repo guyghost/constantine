@@ -1,242 +1,108 @@
-# Scalping Bot
+# Constantine Documentation Hub
 
-A high-frequency trading bot with support for multiple cryptocurrency exchanges, featuring a beautiful terminal UI built with Bubble Tea.
+Cette page fournit une vue d'ensemble des composants techniques du bot multi-agent Constantine ainsi que les pointeurs vers la documentation détaillée.
 
-## Features
+## 🧱 Architecture Principale
 
-- **Multi-Exchange Support**: Hyperliquid, Coinbase, and dYdX
-- **Advanced Trading Strategy**: Scalping strategy with technical indicators (EMA, RSI, MACD, Bollinger Bands, etc.)
-- **Risk Management**: Comprehensive risk controls including position limits, drawdown protection, and cooldown periods
-- **Real-time Market Data**: WebSocket connections for live price feeds and order book updates
-- **Order Management**: Automated order placement, tracking, and position management
-- **Beautiful TUI**: Interactive terminal interface with real-time updates using Bubble Tea
-- **Performance Monitoring**: Track P&L, win rate, and other key metrics
+Constantine repose sur un ensemble d'agents coopératifs :
 
-## Architecture
+- **Agrégateur multi-exchange** (`internal/exchanges/aggregator.go`) : orchestre plusieurs clients d'exchange et consolide balances, positions et ordres.
+- **Clients d'exchange** (`internal/exchanges/{dydx,hyperliquid,coinbase}/`) : implémentations spécifiques, avec dYdX v4 en lecture réelle (trading encore mock) et Hyperliquid/Coinbase en mode démo.
+- **Stratégie Scalping** (`internal/strategy/`) : calcule les signaux via EMA/RSI/Bollinger Bands, configurable via variables d'environnement.
+- **Gestionnaire d'ordres** (`internal/order/`) : ouvre, suit et clôture les positions tout en exposant des callbacks pour la stratégie, l'exécution et la TUI.
+- **Gestionnaire de risque** (`internal/risk/`) : applique limites de drawdown, taille de position, cooldown et exposition par symbole.
+- **Agent d'exécution** (`internal/execution/`) : automatise l'entrée/sortie selon la force du signal et injecte stop loss / take profit.
+- **Interface Terminal (TUI)** (`internal/tui/`) : tableau de bord Bubble Tea affichant signaux, positions agrégées et statut des exchanges.
+- **Télémétrie & Observabilité** (`internal/telemetry/metrics.go`) : serveur HTTP optionnel exposant `/metrics`, `/healthz`, `/readyz`.
+- **Résilience** : modules `internal/circuitbreaker/` et `internal/ratelimit/` fournissent respectivement coupe-circuits et limiteurs de débit réutilisables.
+- **Backtesting** (`internal/backtesting/` & `cmd/backtest/`) : moteur historique avec exchange simulé et reporting.
+
+## 📁 Cartographie des dossiers
 
 ```
-scalping-bot/
-├── cmd/bot/main.go              # Application entry point
-├── internal/
-│   ├── exchanges/               # Exchange integrations
-│   │   ├── interface.go         # Common exchange interface
-│   │   ├── hyperliquid/         # Hyperliquid implementation
-│   │   ├── coinbase/            # Coinbase implementation
-│   │   └── dydx/                # dYdX implementation
-│   ├── strategy/                # Trading strategy
-│   │   ├── scalping.go          # Main scalping strategy
-│   │   ├── indicators.go        # Technical indicators
-│   │   └── signals.go           # Signal generation
-│   ├── order/                   # Order management
-│   │   ├── manager.go           # Order manager
-│   │   └── types.go             # Order types
-│   ├── risk/                    # Risk management
-│   │   └── manager.go           # Risk manager
-│   └── tui/                     # Terminal UI
-│       ├── model.go             # TUI model
-│       ├── update.go            # Update logic
-│       ├── view.go              # View rendering
-│       └── components/          # UI components
-└── pkg/utils/                   # Utility functions
+cmd/
+  ├── bot/           # Point d'entrée du bot temps réel
+  └── backtest/      # CLI de backtesting
+internal/
+  ├── exchanges/     # Interface commune + clients & agrégateur
+  ├── strategy/      # Génération de signaux
+  ├── order/         # Gestion des ordres/positions
+  ├── risk/          # Limites de risque et suivi PnL
+  ├── execution/     # Agent d'exécution automatisée
+  ├── circuitbreaker/# Coupe-circuit générique
+  ├── ratelimit/     # Limiteur token bucket & multi-limiter
+  ├── telemetry/     # Serveur métriques Prometheus
+  ├── tui/           # Interface Bubble Tea
+  ├── backtesting/   # Moteur de simulation
+  ├── logger/        # Configuration slog centralisée
+  └── testutils/     # Helpers de tests
+pkg/
+  └── ...            # Packages utilitaires partagés
+scripts/             # Scripts shell (ex: run_backtest)
+docs/                # Documentation détaillée
 ```
 
-## Installation
+## ⚙️ Configuration par variables d'environnement
 
-### Prerequisites
+Le bot charge automatiquement un fichier `.env` si présent. Les variables clés :
 
-- Go 1.22 or higher
-- API keys for your chosen exchange(s)
+| Catégorie | Variables | Description |
+|-----------|-----------|-------------|
+| Activation exchanges | `ENABLE_DYDX`, `ENABLE_HYPERLIQUID`, `ENABLE_COINBASE` | Active ou désactive chaque client. Au moins un exchange doit être actif. |
+| Auth dYdX | `DYDX_MNEMONIC`, `DYDX_SUBACCOUNT_NUMBER`, `DYDX_API_KEY`, `DYDX_API_SECRET` | Mnemonic recommandé (lecture réelle des comptes & marché). Les appels trading restent mock. |
+| Trading | `TRADING_SYMBOL`, `INITIAL_BALANCE` | Symbole suivi par la stratégie et balance initiale du gestionnaire de risque. |
+| Stratégie | `STRATEGY_SHORT_EMA`, `STRATEGY_LONG_EMA`, `STRATEGY_RSI_PERIOD`, `STRATEGY_TAKE_PROFIT`, `STRATEGY_STOP_LOSS`, `STRATEGY_MAX_POSITION_SIZE`, etc. | Surcharges des valeurs de `strategy.DefaultConfig()`. |
+| Exécution | Config programmée (`execution.DefaultConfig()`) | AutoExecute activé, stop loss 0.5 %, take profit 1 %, seuil signal 0.5. |
+| Logs | `LOG_LEVEL`, `LOG_FORMAT`, `LOG_ADD_SOURCE`, `LOG_OUTPUT_PATH` | Configurent `internal/logger`. |
+| Observabilité | `TELEMETRY_ADDR` | Démarre le serveur métriques/healthcheck sur l'adresse fournie. |
 
-### Build
+Consultez `cmd/bot/main.go` pour la liste exhaustive et l'initialisation des agents.
+
+## ▶️ Lancement rapide
 
 ```bash
-cd docs
+# Installer les dépendances
 go mod download
-go build -o docs cmd/bot/main.go
+
+# Compiler les binaires
+go build -o bin/constantine ./cmd/bot
+go build -o bin/backtest ./cmd/backtest
+
+# Démarrer en mode TUI
+ENABLE_DYDX=true DYDX_MNEMONIC="word1 ... word12" ./bin/constantine
+
+# Mode headless
+./bin/constantine --headless
+
+# Télémétrie (si TELEMETRY_ADDR défini)
+curl -sf http://localhost:9100/metrics
 ```
 
-## Configuration
+Pour plus de détails :
 
-Set environment variables:
+- [README principal](../README.md) — onboarding & avertissements.
+- [EXCHANGE_STATUS.md](./EXCHANGE_STATUS.md) — état fonctionnel de chaque intégration.
+- [DYDX_INTEGRATION.md](./DYDX_INTEGRATION.md) — configuration dYdX.
+- [BACKTESTING.md](./BACKTESTING.md) — moteur historique & CLI.
+- [DEVELOPER.md](./DEVELOPER.md) — procédures de contribution.
+
+## ✅ Tests recommandés
 
 ```bash
-# Exchange selection (hyperliquid, coinbase, or dydx)
-export EXCHANGE=hyperliquid
+# Suite complète
+go test ./...
 
-# API credentials
-export EXCHANGE_API_KEY=your_api_key
-export EXCHANGE_API_SECRET=your_api_secret
+# Couverture backtesting
+go test ./internal/backtesting/...
+
+# Vérification des clients d'exchange
+go test ./internal/exchanges/... -run Test
 ```
 
-## Usage
+## 🔎 Points de vigilance
 
-Run the bot:
+- Le trading réel n'est **pas** encore implémenté pour dYdX/Hyperliquid/Coinbase (`internal/exchanges/*` retournent des mocks pour `PlaceOrder`).
+- Le gestionnaire de risque applique des limites strictes : surveillez les logs lorsque `CanTrade()` renvoie `false`.
+- Les callbacks de la stratégie et de l'agent d'exécution peuvent panic — les compteurs sont traqués via `internal/telemetry/metrics.go`.
 
-```bash
-./docs
-```
-
-### Keyboard Shortcuts
-
-- `1-5`: Switch between views (Dashboard, Order Book, Positions, Orders, Settings)
-- `s`: Start/Stop the bot
-- `r`: Refresh data
-- `c`: Clear error messages
-- `q` or `Ctrl+C`: Quit
-
-## Trading Strategy
-
-The bot uses a scalping strategy based on:
-
-### Technical Indicators
-- **EMA (Exponential Moving Average)**: Fast (9) and Slow (21) periods for trend detection
-- **RSI (Relative Strength Index)**: Overbought/oversold conditions (70/30 thresholds)
-- **Order Book Analysis**: Bid/ask imbalance detection
-- **MACD, Bollinger Bands, ATR**: Additional confirmation signals
-
-### Entry Conditions
-- EMA crossover (short crosses above/below long)
-- RSI confirmation (oversold for buys, overbought for sells)
-- Order book imbalance in favor of the trade direction
-- Signal strength > 50%
-
-### Exit Conditions
-- Take profit: 0.5% (configurable)
-- Stop loss: 0.25% (configurable)
-- RSI extreme levels
-- Opposite signal generated
-
-## Risk Management
-
-The bot includes comprehensive risk management:
-
-- **Position Sizing**: Calculated based on account balance and risk per trade
-- **Maximum Positions**: Limit concurrent open positions
-- **Daily Loss Limit**: Stop trading after reaching daily loss threshold
-- **Drawdown Protection**: Monitor and limit maximum drawdown
-- **Cooldown Period**: Pause trading after consecutive losses
-- **Trade Limits**: Maximum trades per day
-- **Leverage Control**: Maximum leverage per position
-
-### Default Risk Parameters
-
-```go
-MaxPositionSize:      $1000
-MaxPositions:         3
-MaxLeverage:          5x
-MaxDailyLoss:         $100
-MaxDrawdown:          10%
-RiskPerTrade:         1%
-MinAccountBalance:    $100
-DailyTradingLimit:    50
-CooldownPeriod:       15 minutes
-ConsecutiveLossLimit: 3
-```
-
-## Views
-
-### Dashboard
-- Account balance and daily P&L
-- Current trading signal
-- Risk management statistics
-- Recent activity log
-
-### Order Book
-- Real-time bid/ask levels
-- Spread information
-- Volume visualization
-
-### Positions
-- Open positions with entry prices
-- Unrealized P&L
-- Position details and duration
-
-### Orders
-- Open orders
-- Order history
-- Order statistics
-
-## Technical Indicators
-
-All indicators are implemented in `internal/strategy/indicators.go`:
-
-- **EMA**: Exponential Moving Average
-- **SMA**: Simple Moving Average
-- **RSI**: Relative Strength Index
-- **MACD**: Moving Average Convergence Divergence
-- **Bollinger Bands**: Volatility bands
-- **ATR**: Average True Range
-- **VWAP**: Volume Weighted Average Price
-- **Stochastic**: Stochastic Oscillator
-
-## Development
-
-### Adding a New Exchange
-
-1. Create a new directory under `internal/exchanges/`
-2. Implement the `exchanges.Exchange` interface
-3. Add WebSocket support for real-time data
-4. Register in `cmd/bot/main.go`
-
-### Customizing the Strategy
-
-Edit `internal/strategy/scalping.go` to modify:
-- Entry/exit conditions
-- Indicator parameters
-- Signal strength calculation
-- Position sizing logic
-
-### Modifying Risk Parameters
-
-Edit `internal/risk/manager.go` to adjust:
-- Risk limits
-- Position sizing algorithm
-- Cooldown logic
-- Drawdown calculation
-
-## Safety Notice
-
-⚠️ **IMPORTANT**: This bot is for educational purposes. Cryptocurrency trading carries significant risk:
-
-- Start with small amounts or paper trading
-- Thoroughly test the strategy before live trading
-- Monitor the bot regularly
-- Set appropriate risk limits
-- Never invest more than you can afford to lose
-- The bot makes automated trading decisions - understand the risks
-
-## Disclaimer
-
-This software is provided "as is" without warranty of any kind. The authors are not responsible for any financial losses incurred through the use of this bot. Cryptocurrency trading is risky, and past performance does not guarantee future results.
-
-## License
-
-MIT License - See LICENSE file for details
-
-## Contributing
-
-Contributions are welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
-
-## Support
-
-For issues and questions:
-- Open an issue on GitHub
-- Check existing documentation
-- Review the code comments
-
-## Roadmap
-
-- [ ] Backtesting framework
-- [ ] Paper trading mode
-- [ ] More exchange integrations (Binance, Kraken, etc.)
-- [ ] Additional trading strategies
-- [ ] Web-based dashboard
-- [ ] Machine learning signal enhancement
-- [ ] Advanced charting
-- [ ] Telegram notifications
-- [ ] Database persistence
-- [ ] Strategy optimization tools
+Cette page sera mise à jour à mesure que les agents évoluent.
