@@ -119,38 +119,3 @@ func TestInitializeBot_WithMockExchange(t *testing.T) {
 
 	t.Log("Successfully initialized bot with mock exchange")
 }
-
-	// Set up test environment variables for dYdX
-	os.Setenv("DYDX_MNEMONIC", "test test test test test test test test test test test junk")
-	os.Setenv("DYDX_NETWORK", "testnet")
-	os.Setenv("ENABLE_DYDX", "true")
-	os.Setenv("STRATEGY_SYMBOL", "BTC-USD")
-	defer func() {
-		os.Unsetenv("DYDX_MNEMONIC")
-		os.Unsetenv("DYDX_NETWORK")
-		os.Unsetenv("ENABLE_DYDX")
-		os.Unsetenv("STRATEGY_SYMBOL")
-	}()
-
-	// Create a minimal config for testing
-	config := &config.AppConfig{
-		Exchanges: map[string]config.ExchangeConfig{
-			"dydx": {
-				Enabled: false, // Disable dYdX for testing
-			},
-		},
-		StrategySymbol: "BTC-USD",
-		TelemetryAddr:  ":0", // Use random port for testing
-	}
-
-	// Test bot initialization
-	aggregator, strategyEngine, orderManager, riskManager, executionAgent, err := initializeBot(config)
-	testutils.AssertNoError(t, err, "initializeBot should not return error")
-	testutils.AssertNotNil(t, aggregator, "aggregator should not be nil")
-	testutils.AssertNotNil(t, strategyEngine, "strategyEngine should not be nil")
-	testutils.AssertNotNil(t, orderManager, "orderManager should not be nil")
-	testutils.AssertNotNil(t, riskManager, "riskManager should not be nil")
-	testutils.AssertNotNil(t, executionAgent, "executionAgent should not be nil")
-
-	t.Log("Successfully initialized bot with dYdX integration")
-}
