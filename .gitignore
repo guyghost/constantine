@@ -4,6 +4,10 @@
 *.dll
 *.so
 *.dylib
+/bot
+/backtest
+/cmd/bot/bot
+/cmd/backtest/backtest
 
 # Test binary, built with `go test -c`
 *.test
@@ -49,4 +53,3 @@ secrets.json
 *.bak
 *.backup
 bin/
-
