@@ -292,10 +292,12 @@ make vulncheck
 Le projet utilise GitHub Actions avec 5 jobs parallèles pour assurer la qualité du code:
 
 1. **Validation** - Vérifie le formatage (gofmt), go vet, et go.mod/go.sum
-2. **Tests** - Exécute les tests avec race detector et génère le coverage
+2. **Tests** - Exécute les tests avec race detector et génère le coverage (uploadé vers Codecov)
 3. **Linting** - Analyse statique avec golangci-lint (19 linters activés)
 4. **Build** - Compile pour Linux, macOS, et Windows (amd64/arm64)
 5. **Security** - Scan des vulnérabilités avec govulncheck
+
+Les rapports de coverage sont automatiquement uploadés vers [Codecov](https://codecov.io/gh/guyghost/constantine) après chaque exécution des tests. Localement, les rapports sont générés dans `coverage.out` et `coverage.html`.
 
 Toutes les vérifications CI peuvent être exécutées localement:
 
@@ -303,7 +305,7 @@ Toutes les vérifications CI peuvent être exécutées localement:
 # Simuler le job de validation CI
 make ci-validate
 
-# Simuler le job de tests CI
+# Simuler le job de tests CI (génère coverage.out)
 make ci-test
 
 # Simuler le job de linting CI
@@ -355,10 +357,10 @@ curl -sf http://localhost:9100/metrics
 
 Le projet maintient des standards de qualité élevés:
 
-- **Coverage**: Minimum 60% sur les packages critiques
-- **Linting**: golangci-lint avec 19 linters (govet, staticcheck, gosec, etc.)
-- **Race detection**: Tous les tests utilisent `-race`
-- **Security**: Scan automatique avec govulncheck
+- **Coverage**: Les rapports de coverage sont générés automatiquement et disponibles sur [Codecov](https://codecov.io/gh/guyghost/constantine). Les packages critiques (execution, risk, strategy, order, backtesting) visent un coverage minimum de 60%.
+- **Linting**: golangci-lint avec 19 linters (govet, staticcheck, gosec, gocyclo, etc.)
+- **Race detection**: Tous les tests CI utilisent `-race` pour détecter les problèmes de concurrence
+- **Security**: Scan automatique des vulnérabilités avec govulncheck à chaque commit
 - **Documentation**: godoc pour tous les packages publics
 
 
