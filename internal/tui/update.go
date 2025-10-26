@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -105,8 +106,12 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Start/stop the bot
 		if m.IsRunning() {
 			m.SetRunning(false)
-			if m.strategy != nil {
-				m.strategy.Stop()
+			if m.strategyOrchestrator != nil {
+				activeStrategies := m.strategyOrchestrator.GetActiveStrategies()
+				for symbol, strategy := range activeStrategies {
+					strategy.Stop()
+					m.AddMessage(fmt.Sprintf("Strategy stopped for %s", symbol))
+				}
 			}
 			m.AddMessage("Bot stopped")
 		} else {

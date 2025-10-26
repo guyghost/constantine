@@ -14,11 +14,11 @@ import (
 // Model represents the TUI application model
 type Model struct {
 	// Bot state
-	aggregator   *exchanges.ExchangeMultiplexer
-	strategy     *strategy.ScalpingStrategy
-	orderManager *order.Manager
-	riskManager  *risk.Manager
-	running      bool
+	aggregator           *exchanges.ExchangeMultiplexer
+	strategyOrchestrator *strategy.StrategyOrchestrator
+	orderManager         *order.Manager
+	riskManager          *risk.Manager
+	running              bool
 
 	// UI state
 	width      int
@@ -56,19 +56,19 @@ const (
 // NewModel creates a new TUI model
 func NewModel(
 	aggregator *exchanges.ExchangeMultiplexer,
-	strategy *strategy.ScalpingStrategy,
+	strategyOrchestrator *strategy.StrategyOrchestrator,
 	orderManager *order.Manager,
 	riskManager *risk.Manager,
 ) Model {
 	return Model{
-		aggregator:     aggregator,
-		strategy:       strategy,
-		orderManager:   orderManager,
-		riskManager:    riskManager,
-		activeView:     ViewDashboard,
-		currentSignals: make(map[string]interface{}),
-		messages:       make([]string, 0),
-		lastUpdate:     time.Now(),
+		aggregator:           aggregator,
+		strategyOrchestrator: strategyOrchestrator,
+		orderManager:         orderManager,
+		riskManager:          riskManager,
+		activeView:           ViewDashboard,
+		currentSignals:       make(map[string]interface{}),
+		messages:             make([]string, 0),
+		lastUpdate:           time.Now(),
 	}
 }
 

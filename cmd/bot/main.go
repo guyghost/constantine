@@ -125,7 +125,7 @@ func run() error {
 	}()
 
 	// Initialize components
-	multiplexer, strategyEngine, orderManager, riskManager, executionAgent, err := initializeBot(appConfig)
+	multiplexer, strategyOrchestrator, orderManager, riskManager, executionAgent, err := initializeBot(appConfig)
 	if err != nil {
 		return fmt.Errorf("failed to initialize bot: %w", err)
 	}
@@ -137,13 +137,13 @@ func run() error {
 	defer multiplexer.DisconnectAll()
 
 	// Setup callbacks
-	setupCallbacks(strategyEngine, orderManager, riskManager, executionAgent)
+	setupCallbacks(strategyOrchestrator, orderManager, riskManager, executionAgent)
 
 	// Start bot components in background
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := startBotComponents(ctx, strategyEngine, orderManager); err != nil {
+		if err := startBotComponents(ctx, strategyOrchestrator, orderManager); err != nil {
 			botLogger().Error("failed to start bot components", "error", err)
 		}
 	}()
@@ -154,11 +154,11 @@ func run() error {
 
 	// Run in headless or TUI mode
 	if *headless {
-		return runHeadless(ctx, multiplexer, strategyEngine, orderManager, riskManager, executionAgent)
+		return runHeadless(ctx, multiplexer, orderManager, riskManager, executionAgent)
 	}
 
 	// Create TUI model
-	model := tui.NewModel(multiplexer, strategyEngine, orderManager, riskManager)
+	model := tui.NewModel(multiplexer, strategyOrchestrator, orderManager, riskManager)
 
 	// Start the TUI
 	p := tea.NewProgram(model, tea.WithAltScreen())
@@ -178,7 +178,7 @@ func botLogger() *logger.Logger {
 // initializeBot initializes all bot components
 func initializeBot(appConfig *config.AppConfig) (
 	*exchanges.ExchangeMultiplexer,
-	*strategy.ScalpingStrategy,
+	*strategy.StrategyOrchestrator,
 	*order.Manager,
 	*risk.Manager,
 	*execution.ExecutionAgent,
@@ -263,30 +263,49 @@ func initializeBot(appConfig *config.AppConfig) (
 		multiplexer.AddExchange(name, exchange)
 	}
 
-	// Map symbol to primary exchange (for now, use the first one)
+	// Map symbols to primary exchange (for now, use the first one for all)
 	var primaryExchangeName string
 	for name := range exchangesMap {
 		primaryExchangeName = name
 		break
 	}
-	if err := multiplexer.MapSymbol(appConfig.StrategySymbol, primaryExchangeName); err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("failed to map symbol: %w", err)
+
+	// Map all trading symbols to the primary exchange
+	for _, symbol := range appConfig.TradingSymbols {
+		if err := multiplexer.MapSymbol(symbol, primaryExchangeName); err != nil {
+			return nil, nil, nil, nil, nil, fmt.Errorf("failed to map symbol %s: %w", symbol, err)
+		}
+		botLogger().Info("symbol mapped", "symbol", symbol, "exchange", primaryExchangeName)
 	}
 
-	// Create strategy configuration
+	// Create strategy configuration for primary symbol
 	strategyConfig := config.DefaultConfig()
 	strategyConfig.Symbol = appConfig.StrategySymbol
 
-	// Initialize multi-symbol components (for future use)
+	// Initialize multi-symbol components
 	symbolManager := symbolmanager.NewSymbolManager()
-	symbolConfig := symbolmanager.SymbolConfig{
-		Symbol:         appConfig.StrategySymbol,
-		StrategyConfig: strategyConfig,
-		Enabled:        true,
+
+	// Create strategy configuration (shared defaults)
+	baseStrategyConfig := config.DefaultConfig()
+
+	// Add all trading symbols to symbol manager
+	for _, symbol := range appConfig.TradingSymbols {
+		strategyConfig := *baseStrategyConfig // Copy base config
+		strategyConfig.Symbol = symbol
+
+		symbolConfig := symbolmanager.SymbolConfig{
+			Symbol:         symbol,
+			StrategyConfig: &strategyConfig,
+			Enabled:        true,
+		}
+		if err := symbolManager.AddSymbol(symbol, symbolConfig); err != nil {
+			return nil, nil, nil, nil, nil, fmt.Errorf("failed to add symbol %s: %w", symbol, err)
+		}
+		botLogger().Info("symbol configured", "symbol", symbol)
 	}
-	_ = symbolManager.AddSymbol(appConfig.StrategySymbol, symbolConfig)
-	strategyOrchestrator := strategy.NewStrategyOrchestrator(symbolManager)
-	_ = strategyOrchestrator // TODO: use in future
+
+	// Log multi-symbol configuration
+	botLogger().Info("multi-symbol trading configured", "symbols", appConfig.TradingSymbols)
 
 	// Use the first enabled exchange as primary for strategy and order manager
 	var primaryExchange exchanges.Exchange
@@ -295,8 +314,15 @@ func initializeBot(appConfig *config.AppConfig) (
 		break
 	}
 
-	// Create strategy
-	strategyEngine := strategy.NewScalpingStrategy(strategyConfig, primaryExchange)
+	strategyOrchestrator := strategy.NewStrategyOrchestrator(symbolManager, primaryExchange)
+
+	// Start strategies for all active symbols
+	for _, symbol := range appConfig.TradingSymbols {
+		if err := strategyOrchestrator.StartSymbol(context.Background(), symbol); err != nil {
+			return nil, nil, nil, nil, nil, fmt.Errorf("failed to start strategy for %s: %w", symbol, err)
+		}
+		botLogger().Info("strategy started", "symbol", symbol)
+	}
 
 	// Create order manager
 	orderManager := order.NewManager(primaryExchange)
@@ -309,51 +335,57 @@ func initializeBot(appConfig *config.AppConfig) (
 	executionConfig := execution.DefaultConfig()
 	executionAgent := execution.NewExecutionAgent(orderManager, riskManager, executionConfig)
 
-	return multiplexer, strategyEngine, orderManager, riskManager, executionAgent, nil
+	return multiplexer, strategyOrchestrator, orderManager, riskManager, executionAgent, nil
 }
 
 // setupCallbacks sets up callbacks between components
 func setupCallbacks(
-	strategyEngine *strategy.ScalpingStrategy,
+	strategyOrchestrator *strategy.StrategyOrchestrator,
 	orderManager *order.Manager,
 	riskManager *risk.Manager,
 	executionAgent *execution.ExecutionAgent,
 ) {
 	log := botLogger()
 
-	// Strategy signal callback
-	strategyEngine.SetSignalCallback(func(signal *strategy.Signal) {
-		logSensitive := getEnvBool("LOG_SENSITIVE_DATA", false)
+	// Set up callbacks for each active strategy
+	activeStrategies := strategyOrchestrator.GetActiveStrategies()
+	for symbol, strategyInstance := range activeStrategies {
+		// Strategy signal callback
+		strategyInstance.SetSignalCallback(func(signal *strategy.Signal) {
+			logSensitive := getEnvBool("LOG_SENSITIVE_DATA", false)
 
-		if logSensitive {
-			log.Info("strategy signal",
-				"type", signal.Type,
-				"side", signal.Side,
-				"symbol", signal.Symbol,
-				"price", signal.Price.StringFixed(2),
-				"strength", signal.Strength,
-			)
-		} else {
-			log.Info("strategy signal",
-				"type", signal.Type,
-				"side", signal.Side,
-				"symbol", signal.Symbol,
-				"price", "[REDACTED]",
-				"strength", signal.Strength,
-			)
-		}
+			if logSensitive {
+				log.Info("strategy signal",
+					"type", signal.Type,
+					"side", signal.Side,
+					"symbol", signal.Symbol,
+					"price", signal.Price.StringFixed(2),
+					"strength", signal.Strength,
+				)
+			} else {
+				log.Info("strategy signal",
+					"type", signal.Type,
+					"side", signal.Side,
+					"symbol", signal.Symbol,
+					"price", "[REDACTED]",
+					"strength", signal.Strength,
+				)
+			}
 
-		// Handle signal with execution agent
-		ctx := context.Background()
-		if err := executionAgent.HandleSignal(ctx, signal); err != nil {
-			log.Error("execution error", "error", err)
-		}
-	})
+			// Handle signal with execution agent
+			ctx := context.Background()
+			if err := executionAgent.HandleSignal(ctx, signal); err != nil {
+				log.Error("execution error", "error", err)
+			}
+		})
 
-	// Strategy error callback
-	strategyEngine.SetErrorCallback(func(err error) {
-		log.Error("strategy error", "error", err)
-	})
+		// Strategy error callback
+		strategyInstance.SetErrorCallback(func(err error) {
+			log.Error("strategy error", "symbol", symbol, "error", err)
+		})
+
+		log.Info("callbacks set up", "symbol", symbol)
+	}
 
 	// Order manager callbacks
 	orderManager.SetPositionUpdateCallback(func(position *order.ManagedPosition) {
@@ -393,7 +425,7 @@ func setupCallbacks(
 // startBotComponents starts the bot components
 func startBotComponents(
 	ctx context.Context,
-	strategyEngine *strategy.ScalpingStrategy,
+	strategyOrchestrator *strategy.StrategyOrchestrator,
 	orderManager *order.Manager,
 ) error {
 	// Start order manager
@@ -401,18 +433,24 @@ func startBotComponents(
 		return fmt.Errorf("failed to start order manager: %w", err)
 	}
 
-	// Start strategy
-	if err := strategyEngine.Start(ctx); err != nil {
-		return fmt.Errorf("failed to start strategy: %w", err)
+	// Start all strategies in the orchestrator
+	activeStrategies := strategyOrchestrator.GetActiveStrategies()
+	for symbol, strategyInstance := range activeStrategies {
+		if err := strategyInstance.Start(ctx); err != nil {
+			return fmt.Errorf("failed to start strategy for %s: %w", symbol, err)
+		}
 	}
 
-	botLogger().Info("bot components started")
+	botLogger().Info("bot components started", "active_strategies", len(activeStrategies))
 
 	// Wait for context cancellation
 	<-ctx.Done()
 
-	// Stop components
-	strategyEngine.Stop()
+	// Stop all strategies
+	for symbol, strategyInstance := range activeStrategies {
+		strategyInstance.Stop()
+		botLogger().Info("strategy stopped", "symbol", symbol)
+	}
 	orderManager.Stop()
 
 	botLogger().Info("bot components stopped")
@@ -424,7 +462,6 @@ func startBotComponents(
 func runHeadless(
 	ctx context.Context,
 	multiplexer *exchanges.ExchangeMultiplexer,
-	strategyEngine *strategy.ScalpingStrategy,
 	orderManager *order.Manager,
 	riskManager *risk.Manager,
 	executionAgent *execution.ExecutionAgent,

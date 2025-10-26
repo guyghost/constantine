@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -41,6 +42,7 @@ type ExchangeConfig struct {
 type AppConfig struct {
 	TelemetryAddr  string
 	StrategySymbol string
+	TradingSymbols []string // Multi-symbol support
 	InitialBalance decimal.Decimal
 	Exchanges      map[string]ExchangeConfig
 }
@@ -125,6 +127,7 @@ func Load() (*AppConfig, error) {
 	cfg := &AppConfig{
 		TelemetryAddr:  ":9090", // Default telemetry address
 		StrategySymbol: "BTC-USD",
+		TradingSymbols: []string{"BTC-USD"},         // Default single symbol
 		InitialBalance: decimal.NewFromFloat(10000), // Default $10,000
 		Exchanges:      make(map[string]ExchangeConfig),
 	}
@@ -134,9 +137,30 @@ func Load() (*AppConfig, error) {
 		cfg.TelemetryAddr = addr
 	}
 
-	// Load strategy symbol
+	// Load strategy symbol (single symbol, for backward compatibility)
 	if symbol := os.Getenv("STRATEGY_SYMBOL"); symbol != "" {
 		cfg.StrategySymbol = symbol
+		if len(cfg.TradingSymbols) == 1 && cfg.TradingSymbols[0] == "BTC-USD" {
+			cfg.TradingSymbols = []string{symbol}
+		}
+	}
+
+	// Load trading symbols (multi-symbol support)
+	if symbols := os.Getenv("TRADING_SYMBOLS"); symbols != "" {
+		// Parse comma-separated list
+		symbolList := strings.Split(strings.TrimSpace(symbols), ",")
+		var validSymbols []string
+		for _, s := range symbolList {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				validSymbols = append(validSymbols, s)
+			}
+		}
+		if len(validSymbols) > 0 {
+			cfg.TradingSymbols = validSymbols
+			// Set primary symbol to first in list
+			cfg.StrategySymbol = validSymbols[0]
+		}
 	}
 
 	// Load initial balance

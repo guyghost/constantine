@@ -19,13 +19,15 @@ type SymbolManagerInterface interface {
 type StrategyOrchestrator struct {
 	strategies    map[string]*ScalpingStrategy
 	symbolManager SymbolManagerInterface
+	exchange      exchanges.Exchange
 }
 
 // NewStrategyOrchestrator creates a new strategy orchestrator
-func NewStrategyOrchestrator(symbolManager SymbolManagerInterface) *StrategyOrchestrator {
+func NewStrategyOrchestrator(symbolManager SymbolManagerInterface, exchange exchanges.Exchange) *StrategyOrchestrator {
 	return &StrategyOrchestrator{
 		strategies:    make(map[string]*ScalpingStrategy),
 		symbolManager: symbolManager,
+		exchange:      exchange,
 	}
 }
 
@@ -47,10 +49,8 @@ func (so *StrategyOrchestrator) StartSymbol(ctx context.Context, symbol string) 
 		return fmt.Errorf("failed to get config for symbol %s: %w", symbol, err)
 	}
 
-	// Create strategy instance with mock exchange for now
-	// TODO: Pass appropriate exchange based on symbol
-	mockExchange := &exchanges.MockExchange{}
-	strategy := NewScalpingStrategy(symbolConfig.StrategyConfig, mockExchange)
+	// Create strategy instance with the provided exchange
+	strategy := NewScalpingStrategy(symbolConfig.StrategyConfig, so.exchange)
 
 	so.strategies[symbol] = strategy
 
@@ -162,10 +162,8 @@ func (so *StrategyOrchestrator) startSymbolLocked(ctx context.Context, symbol st
 		return fmt.Errorf("failed to get config for symbol %s: %w", symbol, err)
 	}
 
-	// Create strategy instance with mock exchange for now
-	// TODO: Pass appropriate exchange based on symbol
-	mockExchange := &exchanges.MockExchange{}
-	strategy := NewScalpingStrategy(symbolConfig.StrategyConfig, mockExchange)
+	// Create strategy instance with the provided exchange
+	strategy := NewScalpingStrategy(symbolConfig.StrategyConfig, so.exchange)
 
 	so.strategies[symbol] = strategy
 
