@@ -1,5 +1,11 @@
 # Constantine Trading Bot
 
+[![CI](https://github.com/guyghost/constantine/workflows/CI/badge.svg)](https://github.com/guyghost/constantine/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/guyghost/constantine)](https://goreportcard.com/report/github.com/guyghost/constantine)
+[![codecov](https://codecov.io/gh/guyghost/constantine/branch/main/graph/badge.svg)](https://codecov.io/gh/guyghost/constantine)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/guyghost/constantine)](go.mod)
+[![License](https://img.shields.io/github/license/guyghost/constantine)](LICENSE)
+
 > **⚠️ AVERTISSEMENT CRITIQUE - LECTURE OBLIGATOIRE**
 >
 > **CE BOT N'EST PAS PRÊT POUR LE TRADING EN PRODUCTION**
@@ -257,6 +263,64 @@ constantine/
 
 ## 🛠️ Développement
 
+### Configuration du développement
+
+Constantine utilise les meilleures pratiques Go pour le développement et l'intégration continue.
+
+```bash
+# Installer les dépendances
+make install-deps
+
+# Formatter le code
+make fmt
+
+# Lancer tous les checks locaux (comme CI)
+make ci
+
+# Exécuter les tests avec race detector
+make test-race
+
+# Lancer le linting
+make lint
+
+# Vérifier les vulnérabilités de sécurité
+make vulncheck
+```
+
+### Intégration Continue (CI)
+
+Le projet utilise GitHub Actions avec 5 jobs parallèles pour assurer la qualité du code:
+
+1. **Validation** - Vérifie le formatage (gofmt), go vet, et go.mod/go.sum
+2. **Tests** - Exécute les tests avec race detector et génère le coverage
+3. **Linting** - Analyse statique avec golangci-lint (19 linters activés)
+4. **Build** - Compile pour Linux, macOS, et Windows (amd64/arm64)
+5. **Security** - Scan des vulnérabilités avec govulncheck
+
+Toutes les vérifications CI peuvent être exécutées localement:
+
+```bash
+# Simuler le job de validation CI
+make ci-validate
+
+# Simuler le job de tests CI
+make ci-test
+
+# Simuler le job de linting CI
+make ci-lint
+
+# Simuler le job de build CI
+make ci-build
+
+# Simuler le job de sécurité CI
+make ci-security
+
+# Exécuter TOUS les jobs CI localement
+make ci
+```
+
+La CI s'exécute automatiquement sur les branches `main` et toutes les pull requests. Les tests sont exécutés sur Go 1.23 et 1.24 pour assurer la compatibilité.
+
 ### Ajouter un nouvel exchange
 
 1. Créer le dossier `internal/exchanges/[exchange]/`
@@ -273,6 +337,12 @@ Voir `internal/exchanges/dydx/` comme référence.
 # Tests unitaires
 go test ./...
 
+# Tests avec race detector (recommandé)
+make test-race
+
+# Tests avec coverage
+make test-coverage
+
 # Tests ciblés
 go test ./internal/backtesting/...
 go test ./internal/exchanges/... -run Test
@@ -280,6 +350,17 @@ go test ./internal/exchanges/... -run Test
 # Vérifier la télémétrie
 curl -sf http://localhost:9100/metrics
 ```
+
+### Qualité du code
+
+Le projet maintient des standards de qualité élevés:
+
+- **Coverage**: Minimum 60% sur les packages critiques
+- **Linting**: golangci-lint avec 19 linters (govet, staticcheck, gosec, etc.)
+- **Race detection**: Tous les tests utilisent `-race`
+- **Security**: Scan automatique avec govulncheck
+- **Documentation**: godoc pour tous les packages publics
+
 
 ## 🤝 Contribution
 
