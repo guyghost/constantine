@@ -2,10 +2,12 @@ package strategy
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/guyghost/constantine/internal/exchanges"
+	"github.com/shopspring/decimal"
 )
 
 // MockExchangeForStrategy implements Exchange interface for testing
@@ -218,4 +220,158 @@ func TestScalpingStrategy_Getters(t *testing.T) {
 	if orderBook != nil {
 		t.Error("GetOrderBook should return nil initially")
 	}
+}
+
+func TestScalpingStrategy_ValidatePrice(t *testing.T) {
+	config := DefaultConfig()
+	config.MinPrice = decimal.NewFromFloat(10)
+	config.MaxPrice = decimal.NewFromFloat(100)
+	exchange := &MockExchangeForStrategy{}
+	strategy := NewScalpingStrategy(config, exchange)
+
+	tests := []struct {
+		name     string
+		price    decimal.Decimal
+		expected bool
+	}{
+		{"valid price", decimal.NewFromFloat(50), true},
+		{"zero price", decimal.Zero, false},
+		{"negative price", decimal.NewFromFloat(-10), false},
+		{"below min", decimal.NewFromFloat(5), false},
+		{"above max", decimal.NewFromFloat(150), false},
+		{"at min", decimal.NewFromFloat(10), true},
+		{"at max", decimal.NewFromFloat(100), true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := strategy.validatePrice(tt.price)
+			if result != tt.expected {
+				t.Errorf("validatePrice(%s) = %v, want %v", tt.price, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestScalpingStrategy_ValidatePriceChange(t *testing.T) {
+	config := DefaultConfig()
+	config.MaxPriceChangePercent = 5.0
+	exchange := &MockExchangeForStrategy{}
+	strategy := NewScalpingStrategy(config, exchange)
+
+	tests := []struct {
+		name     string
+		oldPrice decimal.Decimal
+		newPrice decimal.Decimal
+		expected bool
+	}{
+		{"no change", decimal.NewFromFloat(100), decimal.NewFromFloat(100), true},
+		{"small change", decimal.NewFromFloat(100), decimal.NewFromFloat(102), true},
+		{"large change", decimal.NewFromFloat(100), decimal.NewFromFloat(106), false},
+		{"zero old price", decimal.Zero, decimal.NewFromFloat(100), true},
+		{"negative change", decimal.NewFromFloat(100), decimal.NewFromFloat(95), true},
+		{"large negative change", decimal.NewFromFloat(100), decimal.NewFromFloat(94), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := strategy.validatePriceChange(tt.oldPrice, tt.newPrice)
+			if result != tt.expected {
+				t.Errorf("validatePriceChange(%s, %s) = %v, want %v", tt.oldPrice, tt.newPrice, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestScalpingStrategy_HandleOrderBook(t *testing.T) {
+	config := DefaultConfig()
+	exchange := &MockExchangeForStrategy{}
+	strategy := NewScalpingStrategy(config, exchange)
+
+	orderBook := &exchanges.OrderBook{
+		Symbol: "BTC-USD",
+		Bids: []exchanges.Level{
+			{Price: decimal.NewFromFloat(50000), Amount: decimal.NewFromFloat(1.0)},
+		},
+		Asks: []exchanges.Level{
+			{Price: decimal.NewFromFloat(50100), Amount: decimal.NewFromFloat(1.0)},
+		},
+	}
+
+	strategy.handleOrderBook(orderBook)
+
+	// Check that order book was stored
+	stored := strategy.GetOrderBook()
+	if stored == nil {
+		t.Fatal("Order book should be stored")
+	}
+	if stored.Symbol != orderBook.Symbol {
+		t.Errorf("Expected symbol %s, got %s", orderBook.Symbol, stored.Symbol)
+	}
+	if len(stored.Bids) != len(orderBook.Bids) {
+		t.Errorf("Expected %d bids, got %d", len(orderBook.Bids), len(stored.Bids))
+	}
+}
+
+func TestScalpingStrategy_HandleTrade(t *testing.T) {
+	config := DefaultConfig()
+	exchange := &MockExchangeForStrategy{}
+	strategy := NewScalpingStrategy(config, exchange)
+
+	trade := &exchanges.Trade{
+		Symbol: "BTC-USD",
+		Side:   exchanges.OrderSideBuy,
+		Price:  decimal.NewFromFloat(50000),
+		Amount: decimal.NewFromFloat(0.1),
+	}
+
+	strategy.handleTrade(trade)
+
+	// Check that volume was added
+	prices := strategy.GetCurrentPrices()
+	if len(prices) != 0 {
+		t.Error("Prices should still be empty")
+	}
+
+	// We can't directly check volumes since they're private, but we can check that the function doesn't panic
+}
+
+func TestScalpingStrategy_EmitError(t *testing.T) {
+	config := DefaultConfig()
+	exchange := &MockExchangeForStrategy{}
+	strategy := NewScalpingStrategy(config, exchange)
+
+	errorReceived := false
+	var receivedError error
+	strategy.SetErrorCallback(func(err error) {
+		errorReceived = true
+		receivedError = err
+	})
+
+	testError := fmt.Errorf("test error")
+	strategy.emitError(testError)
+
+	if !errorReceived {
+		t.Error("Error callback should have been called")
+	}
+	if receivedError != testError {
+		t.Error("Received error should match emitted error")
+	}
+}
+
+func TestSafeInvoke(t *testing.T) {
+	// Test normal function
+	called := false
+	safeInvoke(func() {
+		called = true
+	})
+	if !called {
+		t.Error("Function should have been called")
+	}
+
+	// Test panicking function - safeInvoke should catch the panic
+	safeInvoke(func() {
+		panic("test panic")
+	})
+	// If we reach here, the panic was caught successfully
 }
