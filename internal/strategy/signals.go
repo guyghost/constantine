@@ -48,6 +48,8 @@ func (sg *SignalGenerator) GenerateSignal(
 	volumes []decimal.Decimal,
 	orderbook *exchanges.OrderBook,
 ) *Signal {
+	fmt.Printf("[DEBUG] Strategy analyzing %d prices for %s\n", len(prices), symbol)
+
 	// Validate inputs
 	if err := sg.validateInputs(symbol, prices, volumes); err != nil {
 		return &Signal{Type: SignalTypeNone, Reason: "Input validation failed: " + err.Error()}
@@ -71,6 +73,10 @@ func (sg *SignalGenerator) GenerateSignal(
 	currentRSI := rsi[len(rsi)-1]
 	currentPrice := prices[len(prices)-1]
 
+	fmt.Printf("[DEBUG] Strategy indicators for %s: price=%.2f, shortEMA=%.2f, longEMA=%.2f, RSI=%.2f\n",
+		symbol, currentPrice.InexactFloat64(), currentShortEMA.InexactFloat64(),
+		currentLongEMA.InexactFloat64(), currentRSI.InexactFloat64())
+
 	// Validate calculated values
 	if err := sg.validateCalculatedValues(currentPrice, currentShortEMA, currentLongEMA, currentRSI); err != nil {
 		return &Signal{Type: SignalTypeNone, Reason: "Calculated values validation failed: " + err.Error()}
@@ -79,6 +85,7 @@ func (sg *SignalGenerator) GenerateSignal(
 	// Check for buy signal
 	if sg.isBuySignal(currentShortEMA, currentLongEMA, currentRSI, orderbook) {
 		strength := sg.calculateSignalStrength(currentShortEMA, currentLongEMA, currentRSI, true)
+		fmt.Printf("[DEBUG] Strategy BUY signal generated for %s with strength %.2f\n", symbol, strength)
 		return &Signal{
 			Type:     SignalTypeEntry,
 			Side:     exchanges.OrderSideBuy,
@@ -92,6 +99,7 @@ func (sg *SignalGenerator) GenerateSignal(
 	// Check for sell signal
 	if sg.isSellSignal(currentShortEMA, currentLongEMA, currentRSI, orderbook) {
 		strength := sg.calculateSignalStrength(currentShortEMA, currentLongEMA, currentRSI, false)
+		fmt.Printf("[DEBUG] Strategy SELL signal generated for %s with strength %.2f\n", symbol, strength)
 		return &Signal{
 			Type:     SignalTypeEntry,
 			Side:     exchanges.OrderSideSell,
@@ -102,7 +110,8 @@ func (sg *SignalGenerator) GenerateSignal(
 		}
 	}
 
-	return &Signal{Type: SignalTypeNone}
+	fmt.Printf("[DEBUG] Strategy no signal for %s\n", symbol)
+	return &Signal{Type: SignalTypeNone, Reason: "No signal conditions met"}
 }
 
 // validateInputs validates the input parameters for signal generation

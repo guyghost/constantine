@@ -275,6 +275,8 @@ func (s *ScalpingStrategy) GetSignalGenerator() *SignalGenerator {
 
 // subscribeMarketData subscribes to market data streams
 func (s *ScalpingStrategy) subscribeMarketData(ctx context.Context) error {
+	fmt.Printf("[DEBUG] Strategy subscribing to market data for %s\n", s.config.Symbol)
+
 	// Subscribe to ticker
 	tickerCtx, cancel := context.WithTimeout(ctx, strategyAPITimeout)
 	if err := s.exchange.SubscribeTicker(tickerCtx, s.config.Symbol, s.handleTicker); err != nil {
@@ -282,6 +284,7 @@ func (s *ScalpingStrategy) subscribeMarketData(ctx context.Context) error {
 		return err
 	}
 	cancel()
+	fmt.Printf("[DEBUG] Strategy subscribed to ticker for %s\n", s.config.Symbol)
 
 	// Subscribe to order book
 	orderBookCtx, cancel := context.WithTimeout(ctx, strategyAPITimeout)
@@ -290,6 +293,7 @@ func (s *ScalpingStrategy) subscribeMarketData(ctx context.Context) error {
 		return err
 	}
 	cancel()
+	fmt.Printf("[DEBUG] Strategy subscribed to orderbook for %s\n", s.config.Symbol)
 
 	// Subscribe to trades
 	tradesCtx, cancel := context.WithTimeout(ctx, strategyAPITimeout)
@@ -298,6 +302,7 @@ func (s *ScalpingStrategy) subscribeMarketData(ctx context.Context) error {
 		return err
 	}
 	cancel()
+	fmt.Printf("[DEBUG] Strategy subscribed to trades for %s\n", s.config.Symbol)
 
 	return nil
 }
@@ -306,6 +311,9 @@ func (s *ScalpingStrategy) subscribeMarketData(ctx context.Context) error {
 func (s *ScalpingStrategy) handleTicker(ticker *exchanges.Ticker) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	fmt.Printf("[DEBUG] Strategy received ticker for %s: price=%s, bid=%s, ask=%s\n",
+		ticker.Symbol, ticker.Last.String(), ticker.Bid.String(), ticker.Ask.String())
 
 	// Price sanity checks
 	if !s.validatePrice(ticker.Last) {
@@ -330,6 +338,8 @@ func (s *ScalpingStrategy) handleTicker(ticker *exchanges.Ticker) {
 	if len(s.prices) > 100 {
 		s.prices = s.prices[1:]
 	}
+
+	fmt.Printf("[DEBUG] Strategy price history updated for %s: %d prices stored\n", s.config.Symbol, len(s.prices))
 }
 
 // validatePrice checks if a price is within acceptable ranges
@@ -373,6 +383,9 @@ func (s *ScalpingStrategy) handleOrderBook(orderbook *exchanges.OrderBook) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	fmt.Printf("[DEBUG] Strategy received orderbook for %s: %d bids, %d asks\n",
+		orderbook.Symbol, len(orderbook.Bids), len(orderbook.Asks))
+
 	s.orderbook = orderbook
 }
 
@@ -381,6 +394,9 @@ func (s *ScalpingStrategy) handleTrade(trade *exchanges.Trade) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	fmt.Printf("[DEBUG] Strategy received trade for %s: side=%s, price=%s, amount=%s\n",
+		trade.Symbol, trade.Side, trade.Price.String(), trade.Amount.String())
+
 	// Update volume history
 	s.volumes = append(s.volumes, trade.Amount)
 
@@ -388,6 +404,8 @@ func (s *ScalpingStrategy) handleTrade(trade *exchanges.Trade) {
 	if len(s.volumes) > 100 {
 		s.volumes = s.volumes[1:]
 	}
+
+	fmt.Printf("[DEBUG] Strategy volume history updated for %s: %d volumes stored\n", s.config.Symbol, len(s.volumes))
 }
 
 // run is the main strategy loop
@@ -417,8 +435,13 @@ func (s *ScalpingStrategy) update(ctx context.Context) {
 	orderbook := s.orderbook
 	s.mu.RUnlock()
 
+	fmt.Printf("[DEBUG] Strategy update for %s: %d prices, %d volumes, orderbook=%v\n",
+		s.config.Symbol, len(prices), len(volumes), orderbook != nil)
+
 	// Need enough data for analysis
 	if len(prices) < s.config.LongEMAPeriod {
+		fmt.Printf("[DEBUG] Strategy insufficient data for %s: need %d prices, have %d\n",
+			s.config.Symbol, s.config.LongEMAPeriod, len(prices))
 		return
 	}
 
@@ -434,6 +457,9 @@ func (s *ScalpingStrategy) update(ctx context.Context) {
 	if signal.Type == SignalTypeNone {
 		return
 	}
+
+	fmt.Printf("[DEBUG] Strategy generated signal for %s: type=%s, side=%s, strength=%.2f, reason=%s\n",
+		s.config.Symbol, signal.Type, signal.Side, signal.Strength, signal.Reason)
 
 	// Record signal metrics
 	if signal.Type == SignalTypeEntry {

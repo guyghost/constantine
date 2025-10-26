@@ -68,6 +68,9 @@ func (ws *WebSocketClient) Connect(ctx context.Context) error {
 	// Start message handler
 	go ws.handleMessages(done)
 
+	// Debug log for connection
+	fmt.Printf("[DEBUG] dYdX WebSocket connected to %s\n", ws.url)
+
 	return nil
 }
 

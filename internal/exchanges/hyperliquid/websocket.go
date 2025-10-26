@@ -69,6 +69,9 @@ func (ws *WebSocketClient) Connect(ctx context.Context) error {
 	// Start message handler
 	go ws.handleMessages(done)
 
+	// Debug log for connection
+	fmt.Printf("[DEBUG] Hyperliquid WebSocket connected to %s\n", ws.url)
+
 	return nil
 }
 
@@ -128,6 +131,8 @@ func (ws *WebSocketClient) processMessage(message []byte) {
 	if err := json.Unmarshal(message, &msg); err != nil {
 		return
 	}
+
+	fmt.Printf("[DEBUG] Hyperliquid received message: %s\n", string(message))
 
 	// Hyperliquid WebSocket messages have different formats
 	// Check if it's a subscription response or data update
@@ -195,6 +200,9 @@ func (ws *WebSocketClient) handleTickerMessage(msg map[string]any) {
 			Volume24h: volume24h,
 			Timestamp: time.Now(),
 		}
+
+		fmt.Printf("[DEBUG] Hyperliquid ticker update for %s: bid=%s, ask=%s, last=%s\n",
+			ticker.Symbol, bid.String(), ask.String(), last.String())
 		callback(ticker)
 	}
 }
@@ -314,6 +322,7 @@ func (ws *WebSocketClient) SubscribeTicker(ctx context.Context, symbol string, c
 		"params": []string{fmt.Sprintf("ticker.%s", coin)},
 	}
 
+	fmt.Printf("[DEBUG] Hyperliquid subscribing to ticker for %s\n", symbol)
 	return ws.sendMessage(sub)
 }
 
@@ -330,6 +339,7 @@ func (ws *WebSocketClient) SubscribeOrderBook(ctx context.Context, symbol string
 		"params": []string{fmt.Sprintf("orderbook.%s", coin)},
 	}
 
+	fmt.Printf("[DEBUG] Hyperliquid subscribing to orderbook for %s\n", symbol)
 	return ws.sendMessage(sub)
 }
 
