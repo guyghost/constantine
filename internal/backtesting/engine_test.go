@@ -112,7 +112,7 @@ func TestEngine_Callbacks(t *testing.T) {
 
 func TestEngine_OpenPosition(t *testing.T) {
 	config := DefaultBacktestConfig()
-	config.InitialCapital = decimal.NewFromFloat(100000) // Increase capital for position sizing
+	config.InitialCapital = decimal.NewFromFloat(100000)
 	config.UseFixedAmount = true
 	config.FixedAmount = decimal.NewFromFloat(0.1)
 
@@ -123,7 +123,15 @@ func TestEngine_OpenPosition(t *testing.T) {
 
 	engine := NewEngine(config, data)
 
-	// Create a test signal
+	// Create strategy config for the engine
+	strategyConfig := strategy.DefaultConfig()
+	strategyConfig.Symbol = "BTC-USD"
+	strategyConfig.StopLossPercent = 0.5
+	strategyConfig.TakeProfitPercent = 1.0
+
+	// Create strategy instance
+	engine.strategy = strategy.NewScalpingStrategy(strategyConfig, nil)
+
 	signal := &strategy.Signal{
 		Type:     strategy.SignalTypeEntry,
 		Side:     exchanges.OrderSideBuy,
@@ -158,6 +166,11 @@ func TestEngine_ClosePosition(t *testing.T) {
 	}
 
 	engine := NewEngine(config, data)
+
+	// Initialize strategy (required for openPosition to work)
+	strategyConfig := strategy.DefaultConfig()
+	strategyConfig.Symbol = "BTC-USD"
+	engine.strategy = strategy.NewScalpingStrategy(strategyConfig, engine.exchange)
 
 	// First open a position
 	signal := &strategy.Signal{

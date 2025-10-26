@@ -24,6 +24,7 @@ func TestLoad_SucceedsWithRequiredSecrets(t *testing.T) {
 }
 
 func TestLoad_FailsWhenHyperliquidSecretsMissing(t *testing.T) {
+	t.Setenv("ENABLE_HYPERLIQUID", "true")
 	t.Setenv("ENABLE_COINBASE", "false")
 	t.Setenv("ENABLE_DYDX", "false")
 
@@ -62,7 +63,7 @@ func TestLoad_AllowsTelemetryAndStrategyOverrides(t *testing.T) {
 	t.Setenv("ENABLE_COINBASE", "false")
 	t.Setenv("ENABLE_DYDX", "false")
 	t.Setenv("TELEMETRY_ADDR", ":9200")
-	t.Setenv("TRADING_SYMBOL", "ETH-USD")
+	t.Setenv("STRATEGY_SYMBOL", "ETH-USD")
 	t.Setenv("INITIAL_BALANCE", "25000")
 
 	cfg, err := Load()

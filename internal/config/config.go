@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -190,6 +191,25 @@ func Load() (*AppConfig, error) {
 		APISecret:        os.Getenv("DYDX_API_SECRET"),
 		Mnemonic:         os.Getenv("DYDX_MNEMONIC"),
 		SubAccountNumber: parseIntEnv("DYDX_SUB_ACCOUNT_NUMBER", 0),
+	}
+
+	// Validate exchange configurations
+	if cfg.Exchanges["hyperliquid"].Enabled {
+		if cfg.Exchanges["hyperliquid"].APIKey == "" || cfg.Exchanges["hyperliquid"].APISecret == "" {
+			return nil, fmt.Errorf("hyperliquid enabled but API key or secret is missing")
+		}
+	}
+
+	if cfg.Exchanges["coinbase"].Enabled {
+		if cfg.Exchanges["coinbase"].APIKey == "" || cfg.Exchanges["coinbase"].APISecret == "" {
+			return nil, fmt.Errorf("coinbase enabled but API key or secret is missing")
+		}
+	}
+
+	if cfg.Exchanges["dydx"].Enabled {
+		if cfg.Exchanges["dydx"].Mnemonic == "" && cfg.Exchanges["dydx"].APISecret == "" {
+			return nil, fmt.Errorf("dYdX enabled but no authentication method provided - set DYDX_MNEMONIC or DYDX_API_KEY/DYDX_API_SECRET")
+		}
 	}
 
 	return cfg, nil

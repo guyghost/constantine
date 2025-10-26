@@ -6,6 +6,7 @@ import (
 
 	"github.com/guyghost/constantine/internal/config"
 	"github.com/guyghost/constantine/internal/testutils"
+	"github.com/shopspring/decimal"
 	"log/slog"
 )
 
@@ -97,15 +98,31 @@ func TestLoadLoggerConfig(t *testing.T) {
 }
 
 func TestInitializeBot_WithMockExchange(t *testing.T) {
-	// Create a minimal config for testing with mock exchange
+	// Set up environment variables for dYdX exchange (mock credentials for testing)
+	os.Setenv("ENABLE_DYDX", "true")
+	os.Setenv("DYDX_API_KEY", "test_api_key")
+	os.Setenv("DYDX_API_SECRET", "test_api_secret")
+	os.Setenv("DYDX_STARK_KEY", "test_stark_key")
+	defer func() {
+		os.Unsetenv("ENABLE_DYDX")
+		os.Unsetenv("DYDX_API_KEY")
+		os.Unsetenv("DYDX_API_SECRET")
+		os.Unsetenv("DYDX_STARK_KEY")
+	}()
+
+	// Create a minimal config for testing
 	config := &config.AppConfig{
 		Exchanges: map[string]config.ExchangeConfig{
-			"mock": {
-				Enabled: true,
+			"dydx": {
+				Enabled:   true,
+				APIKey:    "test_api_key",
+				APISecret: "test test test test test test test test test test test junk", // Valid test mnemonic
 			},
 		},
 		StrategySymbol: "BTC-USD",
-		TelemetryAddr:  ":0", // Use random port for testing
+		TelemetryAddr:  ":0",                        // Use random port for testing
+		TradingSymbols: []string{"BTC-USD"},         // Required for initialization
+		InitialBalance: decimal.NewFromFloat(10000), // Required for risk manager
 	}
 
 	// Test bot initialization
@@ -117,5 +134,5 @@ func TestInitializeBot_WithMockExchange(t *testing.T) {
 	testutils.AssertNotNil(t, riskManager, "riskManager should not be nil")
 	testutils.AssertNotNil(t, executionAgent, "executionAgent should not be nil")
 
-	t.Log("Successfully initialized bot with mock exchange")
+	t.Log("Successfully initialized bot with dYdX exchange")
 }
