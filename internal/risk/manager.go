@@ -2,6 +2,8 @@ package risk
 
 import (
 	"fmt"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -43,6 +45,86 @@ func DefaultConfig() *Config {
 		MaxExposurePerSymbol:   decimal.NewFromFloat(30), // 30% max exposure per symbol
 		MaxSameSymbolPositions: 2,                        // Max 2 positions per symbol
 	}
+}
+
+// LoadConfig loads risk management configuration from environment variables
+func LoadConfig() *Config {
+	config := DefaultConfig()
+
+	// Override with environment variables if they exist
+	if val := os.Getenv("RISK_MAX_POSITION_SIZE"); val != "" {
+		if parsed, err := decimal.NewFromString(val); err == nil {
+			config.MaxPositionSize = parsed
+		}
+	}
+
+	if val := os.Getenv("RISK_MAX_POSITIONS"); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil {
+			config.MaxPositions = parsed
+		}
+	}
+
+	if val := os.Getenv("RISK_MAX_LEVERAGE"); val != "" {
+		if parsed, err := decimal.NewFromString(val); err == nil {
+			config.MaxLeverage = parsed
+		}
+	}
+
+	if val := os.Getenv("RISK_MAX_DAILY_LOSS"); val != "" {
+		if parsed, err := decimal.NewFromString(val); err == nil {
+			config.MaxDailyLoss = parsed
+		}
+	}
+
+	if val := os.Getenv("RISK_MAX_DRAWDOWN"); val != "" {
+		if parsed, err := decimal.NewFromString(val); err == nil {
+			config.MaxDrawdown = parsed
+		}
+	}
+
+	if val := os.Getenv("RISK_PER_TRADE"); val != "" {
+		if parsed, err := decimal.NewFromString(val); err == nil {
+			config.RiskPerTrade = parsed
+		}
+	}
+
+	if val := os.Getenv("RISK_MIN_ACCOUNT_BALANCE"); val != "" {
+		if parsed, err := decimal.NewFromString(val); err == nil {
+			config.MinAccountBalance = parsed
+		}
+	}
+
+	if val := os.Getenv("RISK_DAILY_TRADING_LIMIT"); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil {
+			config.DailyTradingLimit = parsed
+		}
+	}
+
+	if val := os.Getenv("RISK_COOLDOWN_PERIOD_MINUTES"); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil {
+			config.CooldownPeriod = time.Duration(parsed) * time.Minute
+		}
+	}
+
+	if val := os.Getenv("RISK_CONSECUTIVE_LOSS_LIMIT"); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil {
+			config.ConsecutiveLossLimit = parsed
+		}
+	}
+
+	if val := os.Getenv("RISK_MAX_EXPOSURE_PER_SYMBOL"); val != "" {
+		if parsed, err := decimal.NewFromString(val); err == nil {
+			config.MaxExposurePerSymbol = parsed
+		}
+	}
+
+	if val := os.Getenv("RISK_MAX_SAME_SYMBOL_POSITIONS"); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil {
+			config.MaxSameSymbolPositions = parsed
+		}
+	}
+
+	return config
 }
 
 // Manager manages trading risk

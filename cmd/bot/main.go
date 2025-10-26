@@ -275,7 +275,7 @@ func initializeBot(appConfig *config.AppConfig) (
 	orderManager := order.NewManager(primaryExchange)
 
 	// Create risk manager
-	riskConfig := risk.DefaultConfig()
+	riskConfig := risk.LoadConfig()
 	riskManager := risk.NewManager(riskConfig, appConfig.InitialBalance)
 
 	// Create execution agent

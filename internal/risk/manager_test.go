@@ -1,6 +1,7 @@
 package risk
 
 import (
+	"os"
 	"testing"
 	"time"
 
@@ -295,4 +296,47 @@ func TestManager_GetStats(t *testing.T) {
 	if stats.TotalTrades != 0 {
 		t.Errorf("expected total trades 0, got %d", stats.TotalTrades)
 	}
+}
+
+func TestLoadConfig(t *testing.T) {
+	// Test with default values
+	config := LoadConfig()
+	if config.MinAccountBalance.String() != "100" {
+		t.Errorf("Expected default MinAccountBalance to be 100, got %s", config.MinAccountBalance.String())
+	}
+
+	// Test with environment variable override
+	originalValue := os.Getenv("RISK_MIN_ACCOUNT_BALANCE")
+	defer func() {
+		if originalValue != "" {
+			os.Setenv("RISK_MIN_ACCOUNT_BALANCE", originalValue)
+		} else {
+			os.Unsetenv("RISK_MIN_ACCOUNT_BALANCE")
+		}
+	}()
+
+	os.Setenv("RISK_MIN_ACCOUNT_BALANCE", "50")
+	config = LoadConfig()
+	if config.MinAccountBalance.String() != "50" {
+		t.Errorf("Expected MinAccountBalance to be 50 after env override, got %s", config.MinAccountBalance.String())
+	}
+
+	// Test integer parsing
+	os.Setenv("RISK_MAX_POSITIONS", "5")
+	config = LoadConfig()
+	if config.MaxPositions != 5 {
+		t.Errorf("Expected MaxPositions to be 5, got %d", config.MaxPositions)
+	}
+
+	// Test decimal parsing
+	os.Setenv("RISK_MAX_POSITION_SIZE", "2000")
+	config = LoadConfig()
+	if config.MaxPositionSize.String() != "2000" {
+		t.Errorf("Expected MaxPositionSize to be 2000, got %s", config.MaxPositionSize.String())
+	}
+
+	// Clean up
+	os.Unsetenv("RISK_MIN_ACCOUNT_BALANCE")
+	os.Unsetenv("RISK_MAX_POSITIONS")
+	os.Unsetenv("RISK_MAX_POSITION_SIZE")
 }
