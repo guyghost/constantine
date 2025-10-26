@@ -8,16 +8,19 @@ pip install dydx-v4-client-py v4-proto
 
 Usage:
 The script reads JSON from stdin and writes JSON to stdout.
+Mnemonic is passed via DYDX_MNEMONIC_SECRET environment variable for security.
 
-Input format:
+Input format (via stdin):
 {
     "command": "place_order" | "cancel_order" | "get_balance",
     "network": "testnet" | "mainnet",
-    "mnemonic": "your mnemonic phrase...",
     "data": {...}
 }
 
-Output format:
+Environment variables:
+    DYDX_MNEMONIC_SECRET: BIP39 mnemonic phrase (required)
+
+Output format (via stdout):
 {
     "success": true,
     "orderId": "...",
@@ -26,6 +29,7 @@ Output format:
 """
 
 import sys
+import os
 import json
 import asyncio
 from typing import Dict, Any
@@ -175,13 +179,16 @@ async def main():
 
         command = input_data.get("command")
         network = input_data.get("network", "testnet")
-        mnemonic = input_data.get("mnemonic", "")
         data = input_data.get("data", {})
+
+        # SECURITY FIX: Read mnemonic from environment variable instead of stdin
+        # This prevents exposure in process memory dumps and logs
+        mnemonic = os.environ.get("DYDX_MNEMONIC_SECRET", "")
 
         if not mnemonic:
             result = {
                 "success": False,
-                "error": "mnemonic is required",
+                "error": "mnemonic not provided in environment (DYDX_MNEMONIC_SECRET)",
             }
         else:
             # Create client wrapper

@@ -3,6 +3,8 @@ package dydx
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -82,12 +84,16 @@ func NewClientWithMnemonic(mnemonic string, subAccountNumber int) (*Client, erro
 	c.httpClient = NewHTTPClient(c.baseURL, "", "")
 
 	// Initialize Python client for order placement
-	scriptPath := "internal/exchanges/dydx/scripts/dydx_client.py"
-	c.pythonClient = NewPythonClient(&PythonClientConfig{
+	// SECURITY FIX: Script path resolution is now handled automatically
+	pythonClient, err := NewPythonClient(&PythonClientConfig{
 		Network:    c.network,
 		Mnemonic:   mnemonic,
-		ScriptPath: scriptPath,
+		ScriptPath: "", // Empty = auto-detect from executable location
 	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize Python client: %w", err)
+	}
+	c.pythonClient = pythonClient
 
 	return c, nil
 }
@@ -121,14 +127,33 @@ func NewClientWithMnemonicAndURL(mnemonic string, subAccountNumber int, baseURL,
 	// Create signer
 	signer := NewSigner(wallet)
 
+	// Infer network from URL
+	network := "mainnet"
+	if strings.Contains(baseURL, "testnet") || strings.Contains(wsURL, "testnet") {
+		network = "testnet"
+	}
+
 	c := &Client{
 		mnemonic: mnemonic,
 		baseURL:  baseURL,
 		wsURL:    wsURL,
 		wallet:   wallet,
 		signer:   signer,
+		network:  network,
 	}
 	c.httpClient = NewHTTPClient(c.baseURL, "", "")
+
+	// Initialize Python client for order placement
+	pythonClient, err := NewPythonClient(&PythonClientConfig{
+		Network:    c.network,
+		Mnemonic:   mnemonic,
+		ScriptPath: "",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize Python client: %w", err)
+	}
+	c.pythonClient = pythonClient
+
 	return c, nil
 }
 
@@ -218,31 +243,50 @@ func (c *Client) GetOrderBook(ctx context.Context, symbol string, depth int) (*e
 		return nil, fmt.Errorf("failed to get orderbook: %w", err)
 	}
 
-	// Convert bids
+	// Convert bids with proper error handling
 	bids := make([]exchanges.Level, 0, len(resp.Bids))
 	for i, bid := range resp.Bids {
 		if i >= depth {
 			break
 		}
 		if len(bid) < 2 {
+			// Skip malformed entries but log for debugging
+			fmt.Fprintf(os.Stderr, "WARNING: malformed bid entry at index %d\n", i)
 			continue
 		}
-		price, _ := decimal.NewFromString(bid[0])
-		amount, _ := decimal.NewFromString(bid[1])
+		price, err := decimal.NewFromString(bid[0])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ERROR: invalid bid price '%s' at index %d: %v\n", bid[0], i, err)
+			continue
+		}
+		amount, err := decimal.NewFromString(bid[1])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ERROR: invalid bid amount '%s' at index %d: %v\n", bid[1], i, err)
+			continue
+		}
 		bids = append(bids, exchanges.Level{Price: price, Amount: amount})
 	}
 
-	// Convert asks
+	// Convert asks with proper error handling
 	asks := make([]exchanges.Level, 0, len(resp.Asks))
 	for i, ask := range resp.Asks {
 		if i >= depth {
 			break
 		}
 		if len(ask) < 2 {
+			fmt.Fprintf(os.Stderr, "WARNING: malformed ask entry at index %d\n", i)
 			continue
 		}
-		price, _ := decimal.NewFromString(ask[0])
-		amount, _ := decimal.NewFromString(ask[1])
+		price, err := decimal.NewFromString(ask[0])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ERROR: invalid ask price '%s' at index %d: %v\n", ask[0], i, err)
+			continue
+		}
+		amount, err := decimal.NewFromString(ask[1])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ERROR: invalid ask amount '%s' at index %d: %v\n", ask[1], i, err)
+			continue
+		}
 		asks = append(asks, exchanges.Level{Price: price, Amount: amount})
 	}
 
@@ -306,13 +350,18 @@ func (c *Client) SubscribeTrades(ctx context.Context, symbol string, callback fu
 func (c *Client) PlaceOrder(ctx context.Context, order *exchanges.Order) (*exchanges.Order, error) {
 	startTime := time.Now()
 
+	// CONCURRENCY FIX: Protected access to pythonClient
+	c.mu.RLock()
+	pythonClient := c.pythonClient
+	c.mu.RUnlock()
+
 	// Check if Python client is available
-	if c.pythonClient == nil {
+	if pythonClient == nil {
 		return nil, fmt.Errorf("Python client not initialized - please use NewClientWithMnemonic")
 	}
 
 	// Place order via Python client
-	result, err := c.pythonClient.PlaceOrder(ctx, order)
+	result, err := pythonClient.PlaceOrder(ctx, order)
 	if err != nil {
 		telemetry.RecordError("PlaceOrderFailed")
 		return nil, fmt.Errorf("failed to place order: %w", err)
@@ -326,13 +375,18 @@ func (c *Client) PlaceOrder(ctx context.Context, order *exchanges.Order) (*excha
 func (c *Client) CancelOrder(ctx context.Context, orderID string) error {
 	startTime := time.Now()
 
+	// CONCURRENCY FIX: Protected access to pythonClient
+	c.mu.RLock()
+	pythonClient := c.pythonClient
+	c.mu.RUnlock()
+
 	// Check if Python client is available
-	if c.pythonClient == nil {
+	if pythonClient == nil {
 		return fmt.Errorf("Python client not initialized - please use NewClientWithMnemonic")
 	}
 
 	// Cancel order via Python client
-	err := c.pythonClient.CancelOrder(ctx, orderID)
+	err := pythonClient.CancelOrder(ctx, orderID)
 	if err != nil {
 		telemetry.RecordError("CancelOrderFailed")
 		return fmt.Errorf("failed to cancel order: %w", err)

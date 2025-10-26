@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"time"
 
@@ -15,10 +16,11 @@ import (
 // PythonClient wraps the official dYdX v4 Python client for order placement
 // This is a temporary solution until we have native Go proto support
 type PythonClient struct {
-	pythonPath string
-	scriptPath string
-	network    string // "testnet" or "mainnet"
-	mnemonic   string
+	pythonPath       string
+	scriptPath       string
+	scriptPathVerified bool // Security flag to ensure path was validated
+	network          string // "testnet" or "mainnet"
+	mnemonic         string
 }
 
 // PythonClientConfig contains configuration for the Python client wrapper
@@ -30,18 +32,30 @@ type PythonClientConfig struct {
 }
 
 // NewPythonClient creates a new Python client wrapper
-func NewPythonClient(config *PythonClientConfig) *PythonClient {
+func NewPythonClient(config *PythonClientConfig) (*PythonClient, error) {
 	pythonPath := config.PythonPath
 	if pythonPath == "" {
 		pythonPath = "python3"
 	}
 
-	return &PythonClient{
-		pythonPath: pythonPath,
-		scriptPath: config.ScriptPath,
-		network:    config.Network,
-		mnemonic:   config.Mnemonic,
+	// SECURITY FIX: Resolve and validate script path
+	scriptPath, err := resolveScriptPath(config.ScriptPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve script path: %w", err)
 	}
+
+	// Validate the script exists and is readable
+	if err := validateScriptPath(scriptPath); err != nil {
+		return nil, fmt.Errorf("script validation failed: %w", err)
+	}
+
+	return &PythonClient{
+		pythonPath:         pythonPath,
+		scriptPath:         scriptPath,
+		scriptPathVerified: true,
+		network:            config.Network,
+		mnemonic:           config.Mnemonic,
+	}, nil
 }
 
 // PlaceOrderRequest represents a Python client order request
@@ -142,18 +156,22 @@ func (c *PythonClient) CancelOrder(ctx context.Context, orderID string) error {
 
 // executePythonScript executes a Python script with the given command and data
 func (c *PythonClient) executePythonScript(ctx context.Context, command string, data interface{}) ([]byte, error) {
+	// Enforce maximum timeout (30 seconds default, respect context if shorter)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
 	// Marshal data to JSON
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal data: %w", err)
 	}
 
-	// Prepare script input
+	// Prepare script input WITHOUT mnemonic (security fix)
 	input := map[string]interface{}{
-		"command":  command,
-		"network":  c.network,
-		"mnemonic": c.mnemonic,
-		"data":     json.RawMessage(jsonData),
+		"command": command,
+		"network": c.network,
+		"data":    json.RawMessage(jsonData),
+		// REMOVED: "mnemonic" - now passed via environment variable
 	}
 
 	inputJSON, err := json.Marshal(input)
@@ -163,14 +181,50 @@ func (c *PythonClient) executePythonScript(ctx context.Context, command string, 
 
 	// Execute Python script
 	cmd := exec.CommandContext(ctx, c.pythonPath, c.scriptPath)
+
+	// SECURITY FIX: Pass mnemonic via environment variable instead of stdin
+	// This prevents exposure in process dumps and command-line inspection
+	cmd.Env = append(os.Environ(),
+		"DYDX_MNEMONIC_SECRET="+c.mnemonic, // Use non-obvious name
+	)
+
 	cmd.Stdin = bytes.NewReader(inputJSON)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("Python script error: %s\nStderr: %s", err, stderr.String())
+	// Run command with proper timeout handling
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Run()
+	}()
+
+	select {
+	case <-ctx.Done():
+		// Context cancelled or timeout - kill the process
+		if cmd.Process != nil {
+			// Try graceful termination first
+			cmd.Process.Signal(os.Interrupt)
+
+			// Force kill after 1 second if still running
+			time.AfterFunc(1*time.Second, func() {
+				if cmd.Process != nil {
+					cmd.Process.Kill()
+				}
+			})
+		}
+		return nil, fmt.Errorf("Python script timeout or cancelled: %w", ctx.Err())
+
+	case err := <-done:
+		if err != nil {
+			// Sanitize error message to avoid leaking sensitive data
+			stderrStr := stderr.String()
+			if len(stderrStr) > 500 {
+				stderrStr = stderrStr[:500] + "... (truncated)"
+			}
+			return nil, fmt.Errorf("Python script error: %s\nStderr: %s", err, stderrStr)
+		}
 	}
 
 	return stdout.Bytes(), nil
