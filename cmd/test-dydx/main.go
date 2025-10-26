@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/guyghost/constantine/internal/exchanges"
@@ -59,12 +60,22 @@ func main() {
 
 	// ÉTAPE 2: Vérifier le solde
 	fmt.Println("\n💰 ÉTAPE 2: Vérification du solde...")
-	balance, err := client.GetBalance(ctx)
+	balances, err := client.GetBalance(ctx)
 	if err != nil {
 		log.Fatalf("❌ Échec récupération solde: %v", err)
 	}
 
-	if usdcBalance, ok := balance["USDC"]; ok {
+	var usdcBalance decimal.Decimal
+	found := false
+	for _, bal := range balances {
+		if bal.Asset == "USDC" {
+			usdcBalance = bal.Free
+			found = true
+			break
+		}
+	}
+
+	if found {
 		fmt.Printf("✅ Solde USDC: %s\n", usdcBalance.String())
 
 		if usdcBalance.LessThan(decimal.NewFromInt(10)) {
@@ -189,9 +200,9 @@ func main() {
 	}
 
 	// RÉSUMÉ FINAL
-	fmt.Println("\n" + "="*50)
+	fmt.Println("\n" + strings.Repeat("=", 50))
 	fmt.Println("📋 RÉSUMÉ DU TEST")
-	fmt.Println("="*50)
+	fmt.Println(strings.Repeat("=", 50))
 	fmt.Println("✅ Connexion au testnet: OK")
 	fmt.Println("✅ Récupération du solde: OK")
 	fmt.Println("✅ Données de marché: OK")
