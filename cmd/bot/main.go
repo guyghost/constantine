@@ -442,6 +442,9 @@ func logAggregatedStatus(
 	// Check if sensitive data logging is enabled
 	logSensitive := getEnvBool("LOG_SENSITIVE_DATA", false)
 
+	// Update risk manager with current total balance from exchanges
+	riskManager.UpdateBalance(data.TotalBalance)
+
 	if logSensitive {
 		log.Info("portfolio status",
 			"total_balance", data.TotalBalance.StringFixed(2),
