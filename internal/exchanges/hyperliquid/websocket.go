@@ -10,6 +10,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/guyghost/constantine/internal/exchanges"
+	"github.com/guyghost/constantine/internal/logger"
 	"github.com/guyghost/constantine/internal/telemetry"
 	"github.com/shopspring/decimal"
 )
@@ -70,7 +71,7 @@ func (ws *WebSocketClient) Connect(ctx context.Context) error {
 	go ws.handleMessages(done)
 
 	// Debug log for connection
-	fmt.Printf("[DEBUG] Hyperliquid WebSocket connected to %s\n", ws.url)
+	logger.Exchange("hyperliquid").Debug("WebSocket connected", "url", ws.url)
 
 	return nil
 }
@@ -132,7 +133,7 @@ func (ws *WebSocketClient) processMessage(message []byte) {
 		return
 	}
 
-	fmt.Printf("[DEBUG] Hyperliquid received message: %s\n", string(message))
+	logger.Exchange("hyperliquid").Debug("received message", "message", string(message))
 
 	// Hyperliquid WebSocket messages have different formats
 	// Check if it's a subscription response or data update
@@ -201,8 +202,11 @@ func (ws *WebSocketClient) handleTickerMessage(msg map[string]any) {
 			Timestamp: time.Now(),
 		}
 
-		fmt.Printf("[DEBUG] Hyperliquid ticker update for %s: bid=%s, ask=%s, last=%s\n",
-			ticker.Symbol, bid.String(), ask.String(), last.String())
+		logger.Exchange("hyperliquid").Debug("ticker update",
+			"symbol", ticker.Symbol,
+			"bid", bid.String(),
+			"ask", ask.String(),
+			"last", last.String())
 		callback(ticker)
 	}
 }
@@ -322,7 +326,7 @@ func (ws *WebSocketClient) SubscribeTicker(ctx context.Context, symbol string, c
 		"params": []string{fmt.Sprintf("ticker.%s", coin)},
 	}
 
-	fmt.Printf("[DEBUG] Hyperliquid subscribing to ticker for %s\n", symbol)
+	logger.Exchange("hyperliquid").Debug("subscribing to ticker", "symbol", symbol)
 	return ws.sendMessage(sub)
 }
 
@@ -339,7 +343,7 @@ func (ws *WebSocketClient) SubscribeOrderBook(ctx context.Context, symbol string
 		"params": []string{fmt.Sprintf("orderbook.%s", coin)},
 	}
 
-	fmt.Printf("[DEBUG] Hyperliquid subscribing to orderbook for %s\n", symbol)
+	logger.Exchange("hyperliquid").Debug("subscribing to orderbook", "symbol", symbol)
 	return ws.sendMessage(sub)
 }
 

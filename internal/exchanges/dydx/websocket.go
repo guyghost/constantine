@@ -9,6 +9,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/guyghost/constantine/internal/exchanges"
+	"github.com/guyghost/constantine/internal/logger"
 	"github.com/guyghost/constantine/internal/telemetry"
 	"github.com/shopspring/decimal"
 )
@@ -69,7 +70,7 @@ func (ws *WebSocketClient) Connect(ctx context.Context) error {
 	go ws.handleMessages(done)
 
 	// Debug log for connection
-	fmt.Printf("[DEBUG] dYdX WebSocket connected to %s\n", ws.url)
+	logger.Exchange("dydx").Debug("WebSocket connected", "url", ws.url)
 
 	return nil
 }

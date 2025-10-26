@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/guyghost/constantine/internal/exchanges"
+	"github.com/guyghost/constantine/internal/logger"
 	"github.com/guyghost/constantine/internal/telemetry"
 	"github.com/shopspring/decimal"
 )
@@ -275,7 +276,7 @@ func (s *ScalpingStrategy) GetSignalGenerator() *SignalGenerator {
 
 // subscribeMarketData subscribes to market data streams
 func (s *ScalpingStrategy) subscribeMarketData(ctx context.Context) error {
-	fmt.Printf("[DEBUG] Strategy subscribing to market data for %s\n", s.config.Symbol)
+	logger.Component("strategy").Debug("subscribing to market data", "symbol", s.config.Symbol)
 
 	// Subscribe to ticker
 	tickerCtx, cancel := context.WithTimeout(ctx, strategyAPITimeout)
@@ -284,7 +285,7 @@ func (s *ScalpingStrategy) subscribeMarketData(ctx context.Context) error {
 		return err
 	}
 	cancel()
-	fmt.Printf("[DEBUG] Strategy subscribed to ticker for %s\n", s.config.Symbol)
+	logger.Component("strategy").Debug("subscribed to ticker", "symbol", s.config.Symbol)
 
 	// Subscribe to order book
 	orderBookCtx, cancel := context.WithTimeout(ctx, strategyAPITimeout)
@@ -293,7 +294,7 @@ func (s *ScalpingStrategy) subscribeMarketData(ctx context.Context) error {
 		return err
 	}
 	cancel()
-	fmt.Printf("[DEBUG] Strategy subscribed to orderbook for %s\n", s.config.Symbol)
+	logger.Component("strategy").Debug("subscribed to orderbook", "symbol", s.config.Symbol)
 
 	// Subscribe to trades
 	tradesCtx, cancel := context.WithTimeout(ctx, strategyAPITimeout)
@@ -302,7 +303,7 @@ func (s *ScalpingStrategy) subscribeMarketData(ctx context.Context) error {
 		return err
 	}
 	cancel()
-	fmt.Printf("[DEBUG] Strategy subscribed to trades for %s\n", s.config.Symbol)
+	logger.Component("strategy").Debug("subscribed to trades", "symbol", s.config.Symbol)
 
 	return nil
 }
@@ -312,8 +313,11 @@ func (s *ScalpingStrategy) handleTicker(ticker *exchanges.Ticker) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	fmt.Printf("[DEBUG] Strategy received ticker for %s: price=%s, bid=%s, ask=%s\n",
-		ticker.Symbol, ticker.Last.String(), ticker.Bid.String(), ticker.Ask.String())
+	logger.Component("strategy").Debug("received ticker",
+		"symbol", ticker.Symbol,
+		"price", ticker.Last.String(),
+		"bid", ticker.Bid.String(),
+		"ask", ticker.Ask.String())
 
 	// Price sanity checks
 	if !s.validatePrice(ticker.Last) {
@@ -339,7 +343,9 @@ func (s *ScalpingStrategy) handleTicker(ticker *exchanges.Ticker) {
 		s.prices = s.prices[1:]
 	}
 
-	fmt.Printf("[DEBUG] Strategy price history updated for %s: %d prices stored\n", s.config.Symbol, len(s.prices))
+	logger.Component("strategy").Debug("price history updated",
+		"symbol", s.config.Symbol,
+		"prices_count", len(s.prices))
 }
 
 // validatePrice checks if a price is within acceptable ranges
@@ -383,8 +389,10 @@ func (s *ScalpingStrategy) handleOrderBook(orderbook *exchanges.OrderBook) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	fmt.Printf("[DEBUG] Strategy received orderbook for %s: %d bids, %d asks\n",
-		orderbook.Symbol, len(orderbook.Bids), len(orderbook.Asks))
+	logger.Component("strategy").Debug("received orderbook",
+		"symbol", orderbook.Symbol,
+		"bids_count", len(orderbook.Bids),
+		"asks_count", len(orderbook.Asks))
 
 	s.orderbook = orderbook
 }
@@ -394,8 +402,11 @@ func (s *ScalpingStrategy) handleTrade(trade *exchanges.Trade) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	fmt.Printf("[DEBUG] Strategy received trade for %s: side=%s, price=%s, amount=%s\n",
-		trade.Symbol, trade.Side, trade.Price.String(), trade.Amount.String())
+	logger.Component("strategy").Debug("received trade",
+		"symbol", trade.Symbol,
+		"side", trade.Side,
+		"price", trade.Price.String(),
+		"amount", trade.Amount.String())
 
 	// Update volume history
 	s.volumes = append(s.volumes, trade.Amount)
@@ -405,7 +416,9 @@ func (s *ScalpingStrategy) handleTrade(trade *exchanges.Trade) {
 		s.volumes = s.volumes[1:]
 	}
 
-	fmt.Printf("[DEBUG] Strategy volume history updated for %s: %d volumes stored\n", s.config.Symbol, len(s.volumes))
+	logger.Component("strategy").Debug("volume history updated",
+		"symbol", s.config.Symbol,
+		"volumes_count", len(s.volumes))
 }
 
 // run is the main strategy loop
@@ -435,13 +448,18 @@ func (s *ScalpingStrategy) update(ctx context.Context) {
 	orderbook := s.orderbook
 	s.mu.RUnlock()
 
-	fmt.Printf("[DEBUG] Strategy update for %s: %d prices, %d volumes, orderbook=%v\n",
-		s.config.Symbol, len(prices), len(volumes), orderbook != nil)
+	logger.Component("strategy").Debug("strategy update",
+		"symbol", s.config.Symbol,
+		"prices_count", len(prices),
+		"volumes_count", len(volumes),
+		"has_orderbook", orderbook != nil)
 
 	// Need enough data for analysis
 	if len(prices) < s.config.LongEMAPeriod {
-		fmt.Printf("[DEBUG] Strategy insufficient data for %s: need %d prices, have %d\n",
-			s.config.Symbol, s.config.LongEMAPeriod, len(prices))
+		logger.Component("strategy").Debug("insufficient data for analysis",
+			"symbol", s.config.Symbol,
+			"required_prices", s.config.LongEMAPeriod,
+			"current_prices", len(prices))
 		return
 	}
 
@@ -458,8 +476,12 @@ func (s *ScalpingStrategy) update(ctx context.Context) {
 		return
 	}
 
-	fmt.Printf("[DEBUG] Strategy generated signal for %s: type=%s, side=%s, strength=%.2f, reason=%s\n",
-		s.config.Symbol, signal.Type, signal.Side, signal.Strength, signal.Reason)
+	logger.Component("strategy").Debug("generated signal",
+		"symbol", s.config.Symbol,
+		"type", signal.Type,
+		"side", signal.Side,
+		"strength", signal.Strength,
+		"reason", signal.Reason)
 
 	// Record signal metrics
 	if signal.Type == SignalTypeEntry {
