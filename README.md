@@ -99,6 +99,7 @@ STRATEGY_STOP_LOSS=0.25
 # Observabilité
 TELEMETRY_ADDR=":9100"
 LOG_LEVEL=debug
+LOG_SENSITIVE_DATA=false
 ```
 
 ⚠️ **Important** : Ajoutez `.env` à votre `.gitignore` !
@@ -196,6 +197,7 @@ Voir [AGENTS.md](AGENTS.md) pour l'architecture complète.
 - ✅ Utilisez un wallet dédié avec capital limité
 - ✅ Testez toujours en backtesting avant production
 - ✅ Commencez avec de petites positions
+- ✅ Activez `LOG_SENSITIVE_DATA=false` pour protéger les données financières dans les logs
 
 ### ⚠️ Avertissements Critiques
 

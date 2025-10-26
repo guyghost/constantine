@@ -296,13 +296,25 @@ func setupCallbacks(
 
 	// Strategy signal callback
 	strategyEngine.SetSignalCallback(func(signal *strategy.Signal) {
-		log.Info("strategy signal",
-			"type", signal.Type,
-			"side", signal.Side,
-			"symbol", signal.Symbol,
-			"price", signal.Price.StringFixed(2),
-			"strength", signal.Strength,
-		)
+		logSensitive := getEnvBool("LOG_SENSITIVE_DATA", false)
+
+		if logSensitive {
+			log.Info("strategy signal",
+				"type", signal.Type,
+				"side", signal.Side,
+				"symbol", signal.Symbol,
+				"price", signal.Price.StringFixed(2),
+				"strength", signal.Strength,
+			)
+		} else {
+			log.Info("strategy signal",
+				"type", signal.Type,
+				"side", signal.Side,
+				"symbol", signal.Symbol,
+				"price", "[REDACTED]",
+				"strength", signal.Strength,
+			)
+		}
 
 		// Handle signal with execution agent
 		ctx := context.Background()
@@ -317,17 +329,23 @@ func setupCallbacks(
 	})
 
 	// Order manager callbacks
-	orderManager.SetOrderUpdateCallback(func(update *order.OrderUpdate) {
-		log.Info("order update",
-			"order_id", update.Order.ID,
-			"event", update.Event,
-			"status", update.Order.Status,
-		)
+	orderManager.SetPositionUpdateCallback(func(position *order.ManagedPosition) {
+		logSensitive := getEnvBool("LOG_SENSITIVE_DATA", false)
 
-		// Record trade in risk manager if filled
-		if update.Event == order.OrderEventFilled {
-			// Calculate PnL and record trade
-			calculateAndRecordPnL(update, orderManager, riskManager)
+		if logSensitive {
+			log.Info("position update",
+				"symbol", position.Symbol,
+				"side", position.Side,
+				"unrealized_pnl", position.UnrealizedPnL.StringFixed(2),
+				"realized_pnl", position.RealizedPnL.StringFixed(2),
+			)
+		} else {
+			log.Info("position update",
+				"symbol", position.Symbol,
+				"side", position.Side,
+				"unrealized_pnl", "[REDACTED]",
+				"realized_pnl", "[REDACTED]",
+			)
 		}
 	})
 
@@ -421,10 +439,20 @@ func logAggregatedStatus(
 	data := aggregator.GetAggregatedData()
 	log := botLogger()
 
-	log.Info("portfolio status",
-		"total_balance", data.TotalBalance.StringFixed(2),
-		"total_pnl", data.TotalPnL.StringFixed(2),
-	)
+	// Check if sensitive data logging is enabled
+	logSensitive := getEnvBool("LOG_SENSITIVE_DATA", false)
+
+	if logSensitive {
+		log.Info("portfolio status",
+			"total_balance", data.TotalBalance.StringFixed(2),
+			"total_pnl", data.TotalPnL.StringFixed(2),
+		)
+	} else {
+		log.Info("portfolio status",
+			"total_balance", "[REDACTED]",
+			"total_pnl", "[REDACTED]",
+		)
+	}
 
 	// Log each exchange status
 	for name, exchangeData := range data.Exchanges {
@@ -435,24 +463,28 @@ func logAggregatedStatus(
 			entry.Warn("exchange error", "error", exchangeData.Error)
 		}
 
-		// Log balances
-		for _, balance := range exchangeData.Balances {
-			if balance.Total.GreaterThan(decimal.Zero) {
-				entry.Info("balance snapshot",
-					"asset", balance.Asset,
-					"total", balance.Total.StringFixed(2),
-				)
+		// Log balances (only if sensitive logging is enabled)
+		if logSensitive {
+			for _, balance := range exchangeData.Balances {
+				if balance.Total.GreaterThan(decimal.Zero) {
+					entry.Info("balance snapshot",
+						"asset", balance.Asset,
+						"total", balance.Total.StringFixed(2),
+					)
+				}
 			}
 		}
 
-		// Log positions
-		for _, position := range exchangeData.Positions {
-			entry.Info("position snapshot",
-				"symbol", position.Symbol,
-				"side", position.Side,
-				"entry_price", position.EntryPrice.StringFixed(2),
-				"unrealized_pnl", position.UnrealizedPnL.StringFixed(2),
-			)
+		// Log positions (only if sensitive logging is enabled)
+		if logSensitive {
+			for _, position := range exchangeData.Positions {
+				entry.Info("position snapshot",
+					"symbol", position.Symbol,
+					"side", position.Side,
+					"entry_price", position.EntryPrice.StringFixed(2),
+					"unrealized_pnl", position.UnrealizedPnL.StringFixed(2),
+				)
+			}
 		}
 	}
 
@@ -468,9 +500,15 @@ func logAggregatedStatus(
 	fields := []any{
 		"active_positions", len(positions),
 		"pending_orders", len(orders),
-		"current_balance", currentBalance.StringFixed(2),
-		"can_trade", canTrade,
 	}
+
+	if logSensitive {
+		fields = append(fields, "current_balance", currentBalance.StringFixed(2))
+	} else {
+		fields = append(fields, "current_balance", "[REDACTED]")
+	}
+
+	fields = append(fields, "can_trade", canTrade)
 	if !canTrade {
 		fields = append(fields, "blocked_reason", reason)
 	}
@@ -519,15 +557,28 @@ func calculateAndRecordPnL(update *order.OrderUpdate, orderManager *order.Manage
 
 				riskManager.RecordTrade(tradeResult)
 
-				botLogger().Info("trade recorded",
-					"symbol", filledOrder.Symbol,
-					"side", filledOrder.Side,
-					"entry_price", pos.EntryPrice.StringFixed(2),
-					"exit_price", filledOrder.Price.StringFixed(2),
-					"amount", pos.Amount.StringFixed(4),
-					"pnl", pnl.StringFixed(2),
-					"is_win", tradeResult.IsWin,
-				)
+				logSensitive := getEnvBool("LOG_SENSITIVE_DATA", false)
+				if logSensitive {
+					botLogger().Info("trade recorded",
+						"symbol", filledOrder.Symbol,
+						"side", filledOrder.Side,
+						"entry_price", pos.EntryPrice.StringFixed(2),
+						"exit_price", filledOrder.Price.StringFixed(2),
+						"amount", pos.Amount.StringFixed(4),
+						"pnl", pnl.StringFixed(2),
+						"is_win", tradeResult.IsWin,
+					)
+				} else {
+					botLogger().Info("trade recorded",
+						"symbol", filledOrder.Symbol,
+						"side", filledOrder.Side,
+						"entry_price", "[REDACTED]",
+						"exit_price", "[REDACTED]",
+						"amount", pos.Amount.StringFixed(4),
+						"pnl", "[REDACTED]",
+						"is_win", tradeResult.IsWin,
+					)
+				}
 				break
 			}
 		}
