@@ -898,8 +898,21 @@ func (c *Client) GetPositions(ctx context.Context) ([]exchanges.Position, error)
 
 // GetPosition retrieves a specific position
 func (c *Client) GetPosition(ctx context.Context, symbol string) (*exchanges.Position, error) {
-	// TODO: Implement REST API call
-	return nil, nil
+	// Get all positions and filter by symbol
+	positions, err := c.GetPositions(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Find position matching the symbol
+	for _, position := range positions {
+		if position.Symbol == symbol {
+			return &position, nil
+		}
+	}
+
+	// No position found for this symbol
+	return nil, fmt.Errorf("no position found for symbol: %s", symbol)
 }
 
 // SupportedSymbols returns list of supported trading symbols
