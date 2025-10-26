@@ -18,17 +18,19 @@ const (
 
 // Client implements the exchanges.Exchange interface for dYdX
 type Client struct {
-	apiKey     string
-	apiSecret  string
-	mnemonic   string
-	baseURL    string
-	wsURL      string
-	connected  bool
-	ws         *WebSocketClient
-	wallet     *Wallet
-	signer     *Signer
-	mu         sync.RWMutex
-	httpClient *HTTPClient
+	apiKey       string
+	apiSecret    string
+	mnemonic     string
+	baseURL      string
+	wsURL        string
+	connected    bool
+	ws           *WebSocketClient
+	wallet       *Wallet
+	signer       *Signer
+	mu           sync.RWMutex
+	httpClient   *HTTPClient
+	pythonClient *PythonClient // For order placement via Python client
+	network      string        // "testnet" or "mainnet"
 }
 
 // NewClient creates a new dYdX client
@@ -49,6 +51,7 @@ func NewClient(apiKey, apiSecret string) (*Client, error) {
 	}
 
 	c.httpClient = NewHTTPClient(c.baseURL, apiKey, "")
+	c.network = "mainnet" // Default to mainnet
 	return c, nil
 }
 
@@ -74,8 +77,18 @@ func NewClientWithMnemonic(mnemonic string, subAccountNumber int) (*Client, erro
 		wsURL:    dydxWSURL,
 		wallet:   wallet,
 		signer:   signer,
+		network:  "mainnet",
 	}
 	c.httpClient = NewHTTPClient(c.baseURL, "", "")
+
+	// Initialize Python client for order placement
+	scriptPath := "internal/exchanges/dydx/scripts/dydx_client.py"
+	c.pythonClient = NewPythonClient(&PythonClientConfig{
+		Network:    c.network,
+		Mnemonic:   mnemonic,
+		ScriptPath: scriptPath,
+	})
+
 	return c, nil
 }
 
@@ -289,18 +302,44 @@ func (c *Client) SubscribeTrades(ctx context.Context, symbol string, callback fu
 	return c.ws.SubscribeTrades(ctx, symbol, callback)
 }
 
-// PlaceOrder places a new order
-// ⚠️ WARNING: NOT IMPLEMENTED - dYdX v4 requires blockchain transactions for order placement
-// This requires a full node client implementation which is not yet available.
-// DO NOT USE in production - orders will appear successful but nothing will execute.
+// PlaceOrder places a new order using the Python client wrapper
 func (c *Client) PlaceOrder(ctx context.Context, order *exchanges.Order) (*exchanges.Order, error) {
-	return nil, fmt.Errorf("PlaceOrder not implemented for dYdX v4 - requires blockchain transaction support")
+	startTime := time.Now()
+
+	// Check if Python client is available
+	if c.pythonClient == nil {
+		return nil, fmt.Errorf("Python client not initialized - please use NewClientWithMnemonic")
+	}
+
+	// Place order via Python client
+	result, err := c.pythonClient.PlaceOrder(ctx, order)
+	if err != nil {
+		telemetry.RecordError("PlaceOrderFailed")
+		return nil, fmt.Errorf("failed to place order: %w", err)
+	}
+
+	telemetry.RecordAPIRequest("dydx", "PlaceOrder", time.Since(startTime))
+	return result, nil
 }
 
-// CancelOrder cancels an existing order
-// ⚠️ WARNING: NOT IMPLEMENTED - dYdX v4 requires blockchain transactions for order cancellation
+// CancelOrder cancels an existing order using the Python client wrapper
 func (c *Client) CancelOrder(ctx context.Context, orderID string) error {
-	return fmt.Errorf("CancelOrder not implemented for dYdX v4 - requires blockchain transaction support")
+	startTime := time.Now()
+
+	// Check if Python client is available
+	if c.pythonClient == nil {
+		return fmt.Errorf("Python client not initialized - please use NewClientWithMnemonic")
+	}
+
+	// Cancel order via Python client
+	err := c.pythonClient.CancelOrder(ctx, orderID)
+	if err != nil {
+		telemetry.RecordError("CancelOrderFailed")
+		return fmt.Errorf("failed to cancel order: %w", err)
+	}
+
+	telemetry.RecordAPIRequest("dydx", "CancelOrder", time.Since(startTime))
+	return nil
 }
 
 // GetOrder retrieves order details

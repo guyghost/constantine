@@ -3,24 +3,24 @@ module github.com/guyghost/constantine
 go 1.24.0
 
 require (
-        github.com/btcsuite/btcd v0.24.2
-        github.com/btcsuite/btcd/btcutil v1.1.6
-        github.com/charmbracelet/bubbletea v1.3.10
-        github.com/charmbracelet/lipgloss v1.1.0
-        github.com/cosmos/cosmos-sdk v0.53.4
-        github.com/golang-jwt/jwt/v5 v5.3.0
-        github.com/google/uuid v1.6.0
-        github.com/gorilla/websocket v1.5.3
-        github.com/joho/godotenv v1.5.1
-        github.com/shopspring/decimal v1.4.0
-        github.com/stretchr/testify v1.10.0
-        github.com/tyler-smith/go-bip39 v1.1.0
-        golang.org/x/crypto v0.43.0
+	github.com/btcsuite/btcd v0.24.2
+	github.com/btcsuite/btcd/btcutil v1.1.6
+	github.com/charmbracelet/bubbletea v1.3.10
+	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/cosmos/cosmos-sdk v0.53.4
+	github.com/golang-jwt/jwt/v5 v5.3.0
+	github.com/google/uuid v1.6.0
+	github.com/gorilla/websocket v1.5.3
+	github.com/joho/godotenv v1.5.1
+	github.com/shopspring/decimal v1.4.0
+	github.com/stretchr/testify v1.10.0
+	github.com/tyler-smith/go-bip39 v1.1.0
+	golang.org/x/crypto v0.43.0
 )
 
 require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
-	github.com/btcsuite/btcd/btcec/v2 v2.1.3 // indirect
+	github.com/btcsuite/btcd/btcec/v2 v2.3.2 // indirect
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0 // indirect
 	github.com/charmbracelet/colorprofile v0.3.2 // indirect
 	github.com/charmbracelet/x/ansi v0.10.2 // indirect
@@ -40,7 +40,6 @@ require (
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
-	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/sys v0.37.0 // indirect
 	golang.org/x/text v0.30.0 // indirect
