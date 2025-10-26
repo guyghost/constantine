@@ -195,6 +195,10 @@ func (t *TestExchange) SubscribeTrades(ctx context.Context, symbol string, callb
 	return nil
 }
 
+func (t *TestExchange) SubscribeCandles(ctx context.Context, symbol string, interval string, callback func(*exchanges.Candle)) error {
+	return nil
+}
+
 func (t *TestExchange) Name() string {
 	return t.NameValue
 }

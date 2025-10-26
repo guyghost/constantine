@@ -18,6 +18,28 @@ const (
 	dydxWSURL  = "wss://indexer.dydx.trade/v4/ws"
 )
 
+// intervalToDYdXResolution converts interval string to dYdX resolution
+func intervalToDYdXResolution(interval string) string {
+	switch interval {
+	case "1m":
+		return "1MIN"
+	case "5m":
+		return "5MINS"
+	case "15m":
+		return "15MINS"
+	case "30m":
+		return "30MINS"
+	case "1h":
+		return "1HOUR"
+	case "4h":
+		return "4HOURS"
+	case "1d":
+		return "1DAY"
+	default:
+		return "1MIN" // default to 1 minute
+	}
+}
+
 // Client implements the exchanges.Exchange interface for dYdX
 type Client struct {
 	apiKey       string
@@ -301,7 +323,8 @@ func (c *Client) GetOrderBook(ctx context.Context, symbol string, depth int) (*e
 // GetCandles retrieves OHLCV data
 func (c *Client) GetCandles(ctx context.Context, symbol string, interval string, limit int) ([]exchanges.Candle, error) {
 	var resp CandlesResponse
-	path := fmt.Sprintf("/v4/candles/perpetualMarkets/%s?resolution=%s&limit=%d", symbol, interval, limit)
+	resolution := intervalToDYdXResolution(interval)
+	path := fmt.Sprintf("/v4/candles/perpetualMarkets/%s?resolution=%s&limit=%d", symbol, resolution, limit)
 	if err := c.httpClient.get(ctx, path, &resp); err != nil {
 		return nil, fmt.Errorf("failed to get candles: %w", err)
 	}
@@ -344,6 +367,45 @@ func (c *Client) SubscribeTrades(ctx context.Context, symbol string, callback fu
 		return fmt.Errorf("websocket not connected")
 	}
 	return c.ws.SubscribeTrades(ctx, symbol, callback)
+}
+
+// SubscribeCandles subscribes to candle updates (using periodic REST API calls)
+func (c *Client) SubscribeCandles(ctx context.Context, symbol string, interval string, callback func(*exchanges.Candle)) error {
+	// dYdX v4 doesn't provide real-time candle streams via WebSocket
+	// We'll simulate by polling the REST API periodically
+
+	resolution := intervalToDYdXResolution(interval)
+
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute) // Poll every minute for 1m candles
+		defer ticker.Stop()
+
+		var lastTimestamp time.Time
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				// Get latest candle
+				candles, err := c.GetCandles(ctx, symbol, resolution, 1)
+				if err != nil {
+					continue
+				}
+
+				if len(candles) > 0 {
+					candle := candles[0]
+					// Only emit if this is a new candle
+					if candle.Timestamp.After(lastTimestamp) {
+						lastTimestamp = candle.Timestamp
+						callback(&candle)
+					}
+				}
+			}
+		}
+	}()
+
+	return nil
 }
 
 // PlaceOrder places a new order using the Python client wrapper
@@ -403,9 +465,73 @@ func (c *Client) GetOrder(ctx context.Context, orderID string) (*exchanges.Order
 }
 
 // GetOpenOrders retrieves all open orders
-// ⚠️ WARNING: NOT IMPLEMENTED - dYdX v4 indexer API may not provide open orders queries
 func (c *Client) GetOpenOrders(ctx context.Context, symbol string) ([]exchanges.Order, error) {
-	return nil, fmt.Errorf("GetOpenOrders not implemented for dYdX v4 - indexer API limitations")
+	if c.wallet == nil {
+		return nil, fmt.Errorf("wallet not initialized - provide mnemonic to access account data")
+	}
+
+	// Get orders for the address and subaccount
+	var ordersData []OrderData
+	path := fmt.Sprintf("/v4/orders?address=%s&subaccountNumber=%d&status=OPEN", c.wallet.Address, c.wallet.SubAccountNumber)
+	if symbol != "" {
+		path += fmt.Sprintf("&market=%s", symbol)
+	}
+	if err := c.httpClient.get(ctx, path, &ordersData); err != nil {
+		return nil, fmt.Errorf("failed to get open orders: %w", err)
+	}
+
+	orders := make([]exchanges.Order, 0, len(ordersData))
+	for _, orderData := range ordersData {
+		var side exchanges.OrderSide
+		if orderData.Side == "BUY" {
+			side = exchanges.OrderSideBuy
+		} else {
+			side = exchanges.OrderSideSell
+		}
+
+		var orderType exchanges.OrderType
+		switch orderData.Type {
+		case "LIMIT":
+			orderType = exchanges.OrderTypeLimit
+		case "MARKET":
+			orderType = exchanges.OrderTypeMarket
+		case "STOP_LIMIT":
+			orderType = exchanges.OrderTypeStopLimit
+		default:
+			orderType = exchanges.OrderTypeLimit // default
+		}
+
+		var status exchanges.OrderStatus
+		switch orderData.Status {
+		case "OPEN":
+			status = exchanges.OrderStatusOpen
+		case "FILLED":
+			status = exchanges.OrderStatusFilled
+		case "CANCELLED":
+			status = exchanges.OrderStatusCanceled
+		case "PENDING":
+			status = exchanges.OrderStatusOpen // treat pending as open
+		default:
+			status = exchanges.OrderStatusOpen // default to open
+		}
+
+		orders = append(orders, exchanges.Order{
+			ID:            orderData.ID,
+			Symbol:        orderData.Market,
+			Side:          side,
+			Type:          orderType,
+			Status:        status,
+			Price:         orderData.Price,
+			Amount:        orderData.Size,
+			Filled:        orderData.Size.Sub(orderData.RemainingSize),
+			Remaining:     orderData.RemainingSize,
+			CreatedAt:     orderData.CreatedAt,
+			ClientOrderID: orderData.ClientID,
+			StopPrice:     orderData.TriggerPrice,
+		})
+	}
+
+	return orders, nil
 }
 
 // GetOrderHistory retrieves order history

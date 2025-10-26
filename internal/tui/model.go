@@ -27,6 +27,7 @@ type Model struct {
 	lastUpdate time.Time
 
 	// Data
+	tradingSymbols []string // Configured trading symbols
 	currentSignals map[string]interface{}
 	openOrders     []*exchanges.Order
 	positions      []*order.ManagedPosition
@@ -59,12 +60,14 @@ func NewModel(
 	strategyOrchestrator *strategy.StrategyOrchestrator,
 	orderManager *order.Manager,
 	riskManager *risk.Manager,
+	tradingSymbols []string,
 ) Model {
 	return Model{
 		aggregator:           aggregator,
 		strategyOrchestrator: strategyOrchestrator,
 		orderManager:         orderManager,
 		riskManager:          riskManager,
+		tradingSymbols:       tradingSymbols,
 		activeView:           ViewDashboard,
 		currentSignals:       make(map[string]interface{}),
 		messages:             make([]string, 0),

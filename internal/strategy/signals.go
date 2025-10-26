@@ -5,6 +5,7 @@ import (
 
 	"github.com/guyghost/constantine/internal/config"
 	"github.com/guyghost/constantine/internal/exchanges"
+	"github.com/guyghost/constantine/internal/logger"
 	"github.com/shopspring/decimal"
 )
 
@@ -72,6 +73,15 @@ func (sg *SignalGenerator) GenerateSignal(
 	currentRSI := rsi[len(rsi)-1]
 	currentPrice := prices[len(prices)-1]
 
+	// Log indicator calculations
+	logger.Component("strategy").Debug("signal calculation",
+		"symbol", symbol,
+		"price", currentPrice.StringFixed(2),
+		"short_ema", currentShortEMA.StringFixed(4),
+		"long_ema", currentLongEMA.StringFixed(4),
+		"rsi", currentRSI.StringFixed(2),
+		"ema_crossover", currentShortEMA.GreaterThan(currentLongEMA))
+
 	// Validate calculated values
 	if err := sg.validateCalculatedValues(currentPrice, currentShortEMA, currentLongEMA, currentRSI); err != nil {
 		return &Signal{Type: SignalTypeNone, Reason: "Calculated values validation failed: " + err.Error()}
@@ -80,6 +90,12 @@ func (sg *SignalGenerator) GenerateSignal(
 	// Check for buy signal
 	if sg.isBuySignal(currentShortEMA, currentLongEMA, currentRSI, orderbook) {
 		strength := sg.calculateSignalStrength(currentShortEMA, currentLongEMA, currentRSI, true)
+		logger.Component("strategy").Debug("buy signal generated",
+			"symbol", symbol,
+			"price", currentPrice.StringFixed(2),
+			"strength", strength,
+			"ema_crossover", currentShortEMA.GreaterThan(currentLongEMA),
+			"rsi_oversold", currentRSI.LessThan(decimal.NewFromFloat(sg.config.RSIOversold)))
 		return &Signal{
 			Type:     SignalTypeEntry,
 			Side:     exchanges.OrderSideBuy,
@@ -93,6 +109,12 @@ func (sg *SignalGenerator) GenerateSignal(
 	// Check for sell signal
 	if sg.isSellSignal(currentShortEMA, currentLongEMA, currentRSI, orderbook) {
 		strength := sg.calculateSignalStrength(currentShortEMA, currentLongEMA, currentRSI, false)
+		logger.Component("strategy").Debug("sell signal generated",
+			"symbol", symbol,
+			"price", currentPrice.StringFixed(2),
+			"strength", strength,
+			"ema_crossover", currentShortEMA.LessThan(currentLongEMA),
+			"rsi_overbought", currentRSI.GreaterThan(decimal.NewFromFloat(sg.config.RSIOverbought)))
 		return &Signal{
 			Type:     SignalTypeEntry,
 			Side:     exchanges.OrderSideSell,
@@ -102,6 +124,14 @@ func (sg *SignalGenerator) GenerateSignal(
 			Reason:   "EMA crossover + RSI overbought",
 		}
 	}
+
+	logger.Component("strategy").Debug("no signal generated",
+		"symbol", symbol,
+		"price", currentPrice.StringFixed(2),
+		"ema_crossover_buy", currentShortEMA.GreaterThan(currentLongEMA),
+		"ema_crossover_sell", currentShortEMA.LessThan(currentLongEMA),
+		"rsi_oversold", currentRSI.LessThan(decimal.NewFromFloat(sg.config.RSIOversold)),
+		"rsi_overbought", currentRSI.GreaterThan(decimal.NewFromFloat(sg.config.RSIOverbought)))
 
 	return &Signal{Type: SignalTypeNone, Reason: "No signal conditions met"}
 }

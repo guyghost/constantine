@@ -3,12 +3,14 @@ package hyperliquid
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"sort"
 	"strconv"
@@ -16,10 +18,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common/math"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/signer/core/apitypes"
+	"github.com/shopspring/decimal"
+	"github.com/vmihailenco/msgpack/v5"
+
 	"github.com/guyghost/constantine/internal/exchanges"
 	"github.com/guyghost/constantine/internal/ratelimit"
 	"github.com/guyghost/constantine/internal/telemetry"
-	"github.com/shopspring/decimal"
 )
 
 const (
@@ -30,6 +37,116 @@ const (
 	// Generally ~50 requests per second according to docs
 	hyperliquidRateLimit = 40.0 // requests per second (conservative)
 )
+
+// addressToBytes converts an Ethereum address to bytes
+func addressToBytes(address string) []byte {
+	if strings.HasPrefix(address, "0x") {
+		address = address[2:]
+	}
+	bytes, _ := hex.DecodeString(address)
+	return bytes
+}
+
+// actionHash creates a hash of the action for signing
+func actionHash(action map[string]interface{}, vaultAddress *string, nonce int64, expiresAfter *int64) []byte {
+	data, _ := msgpack.Marshal(action)
+	data = append(data, big.NewInt(nonce).Bytes()...)
+
+	if vaultAddress == nil {
+		data = append(data, 0x00)
+	} else {
+		data = append(data, 0x01)
+		data = append(data, addressToBytes(*vaultAddress)...)
+	}
+
+	if expiresAfter != nil {
+		data = append(data, 0x00)
+		data = append(data, big.NewInt(*expiresAfter).Bytes()...)
+	}
+
+	hash := crypto.Keccak256Hash(data)
+	return hash.Bytes()
+}
+
+// signL1Action signs an L1 action using EIP-712
+func signL1Action(wallet *ecdsa.PrivateKey, action map[string]interface{}, vaultAddress *string, nonce int64, expiresAfter *int64, isMainnet bool) (map[string]string, error) {
+	hash := actionHash(action, vaultAddress, nonce, expiresAfter)
+
+	// Create phantom agent
+	source := "a"
+	if !isMainnet {
+		source = "b"
+	}
+	phantomAgent := map[string]interface{}{
+		"source":       source,
+		"connectionId": hash,
+	}
+
+	// Create EIP-712 typed data
+	typedData := apitypes.TypedData{
+		Types: apitypes.Types{
+			"Agent": []apitypes.Type{
+				{Name: "source", Type: "string"},
+				{Name: "connectionId", Type: "bytes32"},
+			},
+			"EIP712Domain": []apitypes.Type{
+				{Name: "name", Type: "string"},
+				{Name: "version", Type: "string"},
+				{Name: "chainId", Type: "uint256"},
+				{Name: "verifyingContract", Type: "address"},
+			},
+		},
+		PrimaryType: "Agent",
+		Domain: apitypes.TypedDataDomain{
+			Name:              "Exchange",
+			Version:           "1",
+			ChainId:           math.NewHexOrDecimal256(1337),
+			VerifyingContract: "0x0000000000000000000000000000000000000000",
+		},
+		Message: phantomAgent,
+	}
+
+	// Sign the typed data
+	domainSeparator, err := typedData.HashStruct("EIP712Domain", typedData.Domain.Map())
+	if err != nil {
+		return nil, fmt.Errorf("failed to hash domain: %w", err)
+	}
+
+	typedDataHash, err := typedData.HashStruct(typedData.PrimaryType, typedData.Message)
+	if err != nil {
+		return nil, fmt.Errorf("failed to hash message: %w", err)
+	}
+
+	// Create the final hash
+	finalHash := crypto.Keccak256Hash(
+		[]byte{0x19, 0x01},
+		domainSeparator,
+		typedDataHash,
+	)
+
+	// Sign with the private key
+	signature, err := crypto.Sign(finalHash.Bytes(), wallet)
+	if err != nil {
+		return nil, fmt.Errorf("failed to sign: %w", err)
+	}
+
+	// Convert to r, s, v format
+	r := hex.EncodeToString(signature[:32])
+	s := hex.EncodeToString(signature[32:64])
+	v := signature[64]
+
+	return map[string]string{
+		"r": "0x" + r,
+		"s": "0x" + s,
+		"v": strconv.Itoa(int(v)),
+	}, nil
+}
+
+// floatToWire converts a float to wire format string
+func floatToWire(x float64) string {
+	// Simple implementation - just convert to string with reasonable precision
+	return fmt.Sprintf("%.8f", x)
+}
 
 // extractCoinFromSymbol extracts the coin name from a symbol (e.g., "BTC-USD" -> "BTC")
 func extractCoinFromSymbol(symbol string) string {
@@ -175,6 +292,7 @@ type Client struct {
 	ws         *WebSocketClient
 	mu         sync.RWMutex
 	httpClient *HTTPClient
+	privateKey *ecdsa.PrivateKey
 }
 
 // NewClient creates a new Hyperliquid client
@@ -186,6 +304,20 @@ func NewClient(apiKey, apiSecret string) *Client {
 		wsURL:     hyperliquidWSURL,
 	}
 	c.httpClient = NewHTTPClient(c.baseURL, apiKey, apiSecret)
+
+	// Parse private key if provided
+	if apiSecret != "" {
+		if strings.HasPrefix(apiSecret, "0x") {
+			apiSecret = apiSecret[2:]
+		}
+		privateKeyBytes, err := hex.DecodeString(apiSecret)
+		if err == nil {
+			if privKey, err := crypto.ToECDSA(privateKeyBytes); err == nil {
+				c.privateKey = privKey
+			}
+		}
+	}
+
 	return c
 }
 
@@ -198,6 +330,20 @@ func NewClientWithURL(apiKey, apiSecret, baseURL, wsURL string) *Client {
 		wsURL:     wsURL,
 	}
 	c.httpClient = NewHTTPClient(c.baseURL, apiKey, apiSecret)
+
+	// Parse private key if provided
+	if apiSecret != "" {
+		if strings.HasPrefix(apiSecret, "0x") {
+			apiSecret = apiSecret[2:]
+		}
+		privateKeyBytes, err := hex.DecodeString(apiSecret)
+		if err == nil {
+			if privKey, err := crypto.ToECDSA(privateKeyBytes); err == nil {
+				c.privateKey = privKey
+			}
+		}
+	}
+
 	return c
 }
 
@@ -508,14 +654,93 @@ type HyperliquidOrderRequest struct {
 
 // PlaceOrder places a new order
 func (c *Client) PlaceOrder(ctx context.Context, order *exchanges.Order) (*exchanges.Order, error) {
-	// TODO: Implement authentication and real API call
-	// For now, simulate order placement
-	order.ID = fmt.Sprintf("HL-%d", time.Now().UnixNano())
-	order.Status = exchanges.OrderStatusOpen
-	order.CreatedAt = time.Now()
-	order.UpdatedAt = time.Now()
+	if c.privateKey == nil {
+		return nil, fmt.Errorf("hyperliquid requires a private key to place orders")
+	}
 
-	return order, nil
+	// Extract coin from symbol
+	coin := extractCoinFromSymbol(order.Symbol)
+
+	// For now, use coin name as asset - in production this should be mapped to asset ID
+	// TODO: Implement proper asset ID mapping
+	asset := coin
+
+	// Convert order side
+	var isBuy bool
+	if order.Side == exchanges.OrderSideBuy {
+		isBuy = true
+	}
+
+	// Convert price and size to wire format
+	priceStr := floatToWire(order.Price.InexactFloat64())
+	sizeStr := floatToWire(order.Amount.InexactFloat64())
+
+	// Create order wire
+	orderWire := map[string]interface{}{
+		"a": asset, // asset
+		"b": isBuy,
+		"p": priceStr,
+		"s": sizeStr,
+		"r": false, // reduceOnly - set to false for now
+		"t": map[string]interface{}{
+			"limit": map[string]interface{}{
+				"tif": "Gtc", // Time in force: Good till cancel
+			},
+		},
+	}
+
+	// Create order action
+	orderAction := map[string]interface{}{
+		"type":     "order",
+		"orders":   []interface{}{orderWire},
+		"grouping": "na",
+	}
+
+	// Get timestamp for nonce
+	timestamp := time.Now().UnixMilli()
+
+	// Sign the action
+	signature, err := signL1Action(c.privateKey, orderAction, nil, timestamp, nil, c.baseURL == hyperliquidAPIURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to sign order: %w", err)
+	}
+
+	// Create request payload
+	payload := map[string]interface{}{
+		"action":    orderAction,
+		"nonce":     timestamp,
+		"signature": signature,
+	}
+
+	// Make the request
+	var response map[string]interface{}
+	err = c.httpClient.doRequest(ctx, "POST", "/exchange", payload, &response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to place order: %w", err)
+	}
+
+	// Check response
+	if status, ok := response["status"].(string); ok && status == "ok" {
+		if respData, ok := response["response"].(map[string]interface{}); ok {
+			if data, ok := respData["data"].(map[string]interface{}); ok {
+				if statuses, ok := data["statuses"].([]interface{}); ok && len(statuses) > 0 {
+					if statusData, ok := statuses[0].(map[string]interface{}); ok {
+						if resting, ok := statusData["resting"].(map[string]interface{}); ok {
+							if oid, ok := resting["oid"].(float64); ok {
+								order.ID = fmt.Sprintf("%d", int64(oid))
+								order.Status = exchanges.OrderStatusOpen
+								order.CreatedAt = time.Now()
+								order.UpdatedAt = time.Now()
+								return order, nil
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("failed to parse order response")
 }
 
 // CancelOrder cancels an existing order
@@ -953,6 +1178,43 @@ func (c *Client) GetPosition(ctx context.Context, symbol string) (*exchanges.Pos
 // SupportedSymbols returns list of supported trading symbols
 func (c *Client) SupportedSymbols() []string {
 	return []string{"BTC-USD", "ETH-USD", "SOL-USD", "ARB-USD"}
+}
+
+// SubscribeCandles subscribes to candle updates (using periodic REST API calls)
+func (c *Client) SubscribeCandles(ctx context.Context, symbol string, interval string, callback func(*exchanges.Candle)) error {
+	// Hyperliquid doesn't provide real-time candle streams via WebSocket
+	// We'll simulate by polling the REST API periodically
+
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute) // Poll every minute for 1m candles
+		defer ticker.Stop()
+
+		var lastTimestamp time.Time
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				// Get latest candle
+				candles, err := c.GetCandles(ctx, symbol, interval, 1)
+				if err != nil {
+					continue
+				}
+
+				if len(candles) > 0 {
+					candle := candles[0]
+					// Only emit if this is a new candle
+					if candle.Timestamp.After(lastTimestamp) {
+						lastTimestamp = candle.Timestamp
+						callback(&candle)
+					}
+				}
+			}
+		}
+	}()
+
+	return nil
 }
 
 // Name returns the exchange name

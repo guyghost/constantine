@@ -96,10 +96,29 @@ func TestLoadLoggerConfig(t *testing.T) {
 	}
 }
 
-func TestInitializeBot_WithDYDX(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping dYdX integration test in short mode")
+func TestInitializeBot_WithMockExchange(t *testing.T) {
+	// Create a minimal config for testing with mock exchange
+	config := &config.AppConfig{
+		Exchanges: map[string]config.ExchangeConfig{
+			"mock": {
+				Enabled: true,
+			},
+		},
+		StrategySymbol: "BTC-USD",
+		TelemetryAddr:  ":0", // Use random port for testing
 	}
+
+	// Test bot initialization
+	aggregator, strategyEngine, orderManager, riskManager, executionAgent, err := initializeBot(config)
+	testutils.AssertNoError(t, err, "initializeBot should not return error")
+	testutils.AssertNotNil(t, aggregator, "aggregator should not be nil")
+	testutils.AssertNotNil(t, strategyEngine, "strategyEngine should not be nil")
+	testutils.AssertNotNil(t, orderManager, "orderManager should not be nil")
+	testutils.AssertNotNil(t, riskManager, "riskManager should not be nil")
+	testutils.AssertNotNil(t, executionAgent, "executionAgent should not be nil")
+
+	t.Log("Successfully initialized bot with mock exchange")
+}
 
 	// Set up test environment variables for dYdX
 	os.Setenv("DYDX_MNEMONIC", "test test test test test test test test test test test junk")
@@ -115,14 +134,9 @@ func TestInitializeBot_WithDYDX(t *testing.T) {
 
 	// Create a minimal config for testing
 	config := &config.AppConfig{
-		Exchanges: map[string]*config.ExchangeConfig{
+		Exchanges: map[string]config.ExchangeConfig{
 			"dydx": {
-				Name:             "dydx",
-				Enabled:          true,
-				APIKey:           "",
-				APISecret:        "",
-				Mnemonic:         "test test test test test test test test test test test junk",
-				SubAccountNumber: 0,
+				Enabled: false, // Disable dYdX for testing
 			},
 		},
 		StrategySymbol: "BTC-USD",

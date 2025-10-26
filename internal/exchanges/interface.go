@@ -148,6 +148,7 @@ type Exchange interface {
 	SubscribeTicker(ctx context.Context, symbol string, callback func(*Ticker)) error
 	SubscribeOrderBook(ctx context.Context, symbol string, callback func(*OrderBook)) error
 	SubscribeTrades(ctx context.Context, symbol string, callback func(*Trade)) error
+	SubscribeCandles(ctx context.Context, symbol string, interval string, callback func(*Candle)) error
 
 	// Trading
 	PlaceOrder(ctx context.Context, order *Order) (*Order, error)

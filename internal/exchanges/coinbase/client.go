@@ -1085,6 +1085,43 @@ func (c *Client) SupportedSymbols() []string {
 	return []string{"BTC-USD", "ETH-USD", "SOL-USD", "LINK-USD"}
 }
 
+// SubscribeCandles subscribes to candle updates (using periodic REST API calls)
+func (c *Client) SubscribeCandles(ctx context.Context, symbol string, interval string, callback func(*exchanges.Candle)) error {
+	// Coinbase doesn't provide real-time candle streams via WebSocket
+	// We'll simulate by polling the REST API periodically
+
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute) // Poll every minute for 1m candles
+		defer ticker.Stop()
+
+		var lastTimestamp time.Time
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				// Get latest candle
+				candles, err := c.GetCandles(ctx, symbol, interval, 1)
+				if err != nil {
+					continue
+				}
+
+				if len(candles) > 0 {
+					candle := candles[0]
+					// Only emit if this is a new candle
+					if candle.Timestamp.After(lastTimestamp) {
+						lastTimestamp = candle.Timestamp
+						callback(&candle)
+					}
+				}
+			}
+		}
+	}()
+
+	return nil
+}
+
 // Name returns the exchange name
 func (c *Client) Name() string {
 	return "Coinbase"

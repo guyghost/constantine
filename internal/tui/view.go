@@ -151,17 +151,20 @@ func (m Model) renderDashboard() string {
 	// Summary
 	summary := m.renderSummary()
 
+	// Trading symbols status
+	symbolsBox := m.renderTradingSymbols()
+
 	// Current signal
 	signalBox := m.renderCurrentSignal()
 
 	// Recent messages
 	messagesBox := m.renderMessages()
 
-	// Arrange in grid
-	topRow := lipgloss.JoinHorizontal(lipgloss.Top, summary, "  ", signalBox)
-	middleRow := messagesBox
+	// Arrange in grid - 2x2 layout
+	topRow := lipgloss.JoinHorizontal(lipgloss.Top, summary, "  ", symbolsBox)
+	bottomRow := lipgloss.JoinHorizontal(lipgloss.Top, signalBox, "  ", messagesBox)
 
-	return lipgloss.JoinVertical(lipgloss.Left, topRow, "", middleRow)
+	return lipgloss.JoinVertical(lipgloss.Left, topRow, "", bottomRow)
 }
 
 // renderSummary renders the summary box
@@ -218,17 +221,28 @@ func (m Model) renderCurrentSignal() string {
 		for symbol, sig := range m.currentSignals {
 			// Type assertion to strategy.Signal
 			if signal, ok := sig.(*strategy.Signal); ok {
-				sideStyle := successStyle
-				if signal.Side == "sell" {
-					sideStyle = errorStyle
+				// Signal type icon
+				signalIcon := "📈"
+				if signal.Type == "exit" {
+					signalIcon = "📉"
 				}
 
-				content.WriteString(fmt.Sprintf("%s: %s %s\n",
+				// Side styling
+				sideStyle := successStyle
+				sideIcon := "↗️"
+				if signal.Side == exchanges.OrderSideSell {
+					sideStyle = errorStyle
+					sideIcon = "↘️"
+				}
+
+				content.WriteString(fmt.Sprintf("%s %s %s\n",
+					signalIcon,
 					symbol,
-					signal.Type,
-					sideStyle.Render(string(signal.Side))))
+					sideStyle.Render(fmt.Sprintf("%s %s", sideIcon, string(signal.Side)))))
+
 				content.WriteString(fmt.Sprintf("  Price: $%s\n", signal.Price.StringFixed(2)))
 				content.WriteString(fmt.Sprintf("  Strength: %.1f%%\n", signal.Strength*100))
+				content.WriteString(fmt.Sprintf("  Reason: %s\n", signal.Reason))
 				content.WriteString("\n")
 			}
 		}
@@ -249,6 +263,59 @@ func (m Model) renderMessages() string {
 	} else {
 		for _, msg := range messages {
 			content.WriteString(mutedStyle.Render(msg) + "\n")
+		}
+	}
+
+	return boxStyle.Render(content.String())
+}
+
+// renderTradingSymbols renders the trading symbols status
+func (m Model) renderTradingSymbols() string {
+	var content strings.Builder
+
+	content.WriteString(headerStyle.Render("Trading Symbols") + "\n\n")
+
+	// Show all configured trading symbols with their signal status
+	if len(m.tradingSymbols) == 0 {
+		content.WriteString(mutedStyle.Render("No trading symbols configured"))
+	} else {
+		for _, symbol := range m.tradingSymbols {
+			// Check if this symbol has an active signal
+			sig, hasSignal := m.currentSignals[symbol]
+
+			statusIcon := "⚫"
+			statusStyle := mutedStyle
+			statusText := "No signal"
+
+			if hasSignal {
+				if signal, ok := sig.(*strategy.Signal); ok {
+					switch signal.Type {
+					case "entry":
+						if signal.Side == exchanges.OrderSideBuy {
+							statusIcon = "🟢"
+							statusStyle = successStyle
+							statusText = fmt.Sprintf("BUY %.1f%%", signal.Strength*100)
+						} else {
+							statusIcon = "🔴"
+							statusStyle = errorStyle
+							statusText = fmt.Sprintf("SELL %.1f%%", signal.Strength*100)
+						}
+					case "exit":
+						statusIcon = "⚪"
+						statusStyle = mutedStyle
+						statusText = "EXIT"
+					default:
+						statusIcon = "🟡"
+						statusStyle = mutedStyle
+						statusText = "UNKNOWN"
+					}
+				}
+			}
+
+			content.WriteString(fmt.Sprintf("%s %s: %s\n",
+				statusIcon,
+				symbol,
+				statusStyle.Render(statusText)))
 		}
 	}
 

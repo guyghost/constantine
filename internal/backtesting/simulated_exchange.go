@@ -112,6 +112,11 @@ func (s *SimulatedExchange) SubscribeTrades(ctx context.Context, symbol string, 
 	return fmt.Errorf("not implemented for simulated exchange")
 }
 
+// SubscribeCandles not implemented for simulated exchange
+func (s *SimulatedExchange) SubscribeCandles(ctx context.Context, symbol string, interval string, callback func(*exchanges.Candle)) error {
+	return fmt.Errorf("not implemented for simulated exchange")
+}
+
 // PlaceOrder simulates placing an order (not used in backtesting)
 func (s *SimulatedExchange) PlaceOrder(ctx context.Context, order *exchanges.Order) (*exchanges.Order, error) {
 	return order, nil

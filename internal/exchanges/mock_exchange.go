@@ -176,6 +176,10 @@ func (m *MockExchange) SubscribeTrades(ctx context.Context, symbol string, callb
 	return nil
 }
 
+func (m *MockExchange) SubscribeCandles(ctx context.Context, symbol string, interval string, callback func(*Candle)) error {
+	return nil
+}
+
 func (m *MockExchange) Name() string {
 	return m.name
 }

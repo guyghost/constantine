@@ -17,6 +17,11 @@ import (
 
 const strategyAPITimeout = 5 * time.Second
 
+// DefaultConfig returns default scalping strategy configuration
+func DefaultConfig() *config.Config {
+	return config.DefaultConfig()
+}
+
 func parseIntEnv(key string, defaultValue int) int {
 	value := os.Getenv(key)
 	if value == "" {
@@ -192,7 +197,21 @@ func (s *ScalpingStrategy) GetSignalGenerator() *SignalGenerator {
 func (s *ScalpingStrategy) subscribeMarketData(ctx context.Context) error {
 	logger.Component("strategy").Debug("subscribing to market data", "symbol", s.config.Symbol)
 
-	// Subscribe to ticker
+	// First, preload historical candles to have enough data for indicators
+	if err := s.preloadHistoricalCandles(ctx); err != nil {
+		logger.Component("strategy").Warn("failed to preload historical candles, continuing without historical data", "error", err)
+	}
+
+	// Subscribe to candles for OHLCV data (primary data source)
+	candleCtx, cancel := context.WithTimeout(ctx, strategyAPITimeout)
+	if err := s.exchange.SubscribeCandles(candleCtx, s.config.Symbol, "1m", s.handleCandle); err != nil {
+		cancel()
+		return err
+	}
+	cancel()
+	logger.Component("strategy").Debug("subscribed to candles", "symbol", s.config.Symbol)
+
+	// Subscribe to ticker for additional price updates
 	tickerCtx, cancel := context.WithTimeout(ctx, strategyAPITimeout)
 	if err := s.exchange.SubscribeTicker(tickerCtx, s.config.Symbol, s.handleTicker); err != nil {
 		cancel()
@@ -220,6 +239,85 @@ func (s *ScalpingStrategy) subscribeMarketData(ctx context.Context) error {
 	logger.Component("strategy").Debug("subscribed to trades", "symbol", s.config.Symbol)
 
 	return nil
+}
+
+// preloadHistoricalCandles loads historical candle data to initialize indicators
+func (s *ScalpingStrategy) preloadHistoricalCandles(ctx context.Context) error {
+	logger.Component("strategy").Debug("preloading historical candles", "symbol", s.config.Symbol)
+
+	// Calculate how many candles to load
+	// We need at least 2x the longest period to ensure smooth indicator calculations
+	maxPeriod := max(s.config.ShortEMAPeriod, s.config.LongEMAPeriod, s.config.RSIPeriod, 20) // 20 for Bollinger Bands
+	minCandles := maxPeriod * 2
+	candlesToLoad := max(minCandles, 100) // Load at least 100 candles
+
+	logger.Component("strategy").Debug("calculated candles to load",
+		"symbol", s.config.Symbol,
+		"max_period", maxPeriod,
+		"candles_to_load", candlesToLoad)
+
+	// Load historical candles
+	loadCtx, cancel := context.WithTimeout(ctx, strategyAPITimeout*2) // Longer timeout for historical data
+	defer cancel()
+
+	candles, err := s.exchange.GetCandles(loadCtx, s.config.Symbol, "1m", candlesToLoad)
+	if err != nil {
+		return fmt.Errorf("failed to load historical candles: %w", err)
+	}
+
+	if len(candles) == 0 {
+		return fmt.Errorf("no historical candles available")
+	}
+
+	logger.Component("strategy").Debug("loaded historical candles",
+		"symbol", s.config.Symbol,
+		"candles_loaded", len(candles))
+
+	// Process candles in chronological order (oldest first)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, candle := range candles {
+		// Validate candle data
+		if !s.validatePrice(candle.Close) {
+			logger.Component("strategy").Warn("skipping invalid candle",
+				"symbol", s.config.Symbol,
+				"timestamp", candle.Timestamp,
+				"close", candle.Close.String())
+			continue
+		}
+
+		// Add to price and volume history
+		s.prices = append(s.prices, candle.Close)
+		s.volumes = append(s.volumes, candle.Volume)
+
+		// Keep only last 100 entries to prevent memory issues
+		if len(s.prices) > 100 {
+			s.prices = s.prices[1:]
+			s.volumes = s.volumes[1:]
+		}
+	}
+
+	logger.Component("strategy").Debug("historical candles processed",
+		"symbol", s.config.Symbol,
+		"prices_count", len(s.prices),
+		"volumes_count", len(s.volumes))
+
+	return nil
+}
+
+// max returns the maximum of the provided integers
+func max(values ...int) int {
+	if len(values) == 0 {
+		return 0
+	}
+	maxVal := values[0]
+	for _, v := range values[1:] {
+		if v > maxVal {
+			maxVal = v
+		}
+	}
+	return maxVal
 }
 
 // handleTicker handles ticker updates
@@ -311,6 +409,40 @@ func (s *ScalpingStrategy) handleOrderBook(orderbook *exchanges.OrderBook) {
 	s.orderbook = orderbook
 }
 
+// handleCandle handles candle updates
+func (s *ScalpingStrategy) handleCandle(candle *exchanges.Candle) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	logger.Component("strategy").Debug("received candle",
+		"symbol", candle.Symbol,
+		"timestamp", candle.Timestamp,
+		"open", candle.Open.String(),
+		"high", candle.High.String(),
+		"low", candle.Low.String(),
+		"close", candle.Close.String(),
+		"volume", candle.Volume.String())
+
+	// Use close price for price history (most relevant for indicators)
+	s.prices = append(s.prices, candle.Close)
+
+	// Update volume history
+	s.volumes = append(s.volumes, candle.Volume)
+
+	// Keep only last 100 entries
+	if len(s.prices) > 100 {
+		s.prices = s.prices[1:]
+	}
+	if len(s.volumes) > 100 {
+		s.volumes = s.volumes[1:]
+	}
+
+	logger.Component("strategy").Debug("candle processed",
+		"symbol", s.config.Symbol,
+		"prices_count", len(s.prices),
+		"volumes_count", len(s.volumes))
+}
+
 // handleTrade handles trade updates
 func (s *ScalpingStrategy) handleTrade(trade *exchanges.Trade) {
 	s.mu.Lock()
@@ -322,7 +454,7 @@ func (s *ScalpingStrategy) handleTrade(trade *exchanges.Trade) {
 		"price", trade.Price.String(),
 		"amount", trade.Amount.String())
 
-	// Update volume history
+	// Update volume history (additional to candles)
 	s.volumes = append(s.volumes, trade.Amount)
 
 	// Keep only last 100 volumes
@@ -540,6 +672,13 @@ func (s *ScalpingStrategy) ProcessCandle(candle exchanges.Candle) {
 		"symbol", s.config.Symbol,
 		"prices_count", len(s.prices),
 		"volumes_count", len(s.volumes))
+}
+
+// GetLastSignal returns the last generated signal
+func (s *ScalpingStrategy) GetLastSignal() *Signal {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lastSignal
 }
 
 // GetCurrentPrices returns the current price history

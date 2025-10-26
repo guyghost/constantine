@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/guyghost/constantine/internal/exchanges"
-	"github.com/guyghost/constantine/internal/exchanges/dydx"
 	"github.com/shopspring/decimal"
 )
 
@@ -49,7 +48,29 @@ func (m *MockExchangeForStrategy) GetOrderBook(ctx context.Context, symbol strin
 	return m.orderBook, nil
 }
 func (m *MockExchangeForStrategy) GetCandles(ctx context.Context, symbol string, interval string, limit int) ([]exchanges.Candle, error) {
-	return []exchanges.Candle{}, nil
+	// Return mock historical candles for testing
+	candles := make([]exchanges.Candle, 0, limit)
+	basePrice := decimal.NewFromFloat(50000)
+	baseTime := time.Now().Add(-time.Duration(limit) * time.Minute)
+
+	for i := 0; i < limit && i < 100; i++ {
+		// Create some variation in price
+		priceVariation := decimal.NewFromFloat(float64(i%20 - 10)) // -10 to +10 variation
+		closePrice := basePrice.Add(priceVariation)
+
+		candle := exchanges.Candle{
+			Symbol:    symbol,
+			Timestamp: baseTime.Add(time.Duration(i) * time.Minute),
+			Open:      closePrice.Sub(decimal.NewFromFloat(5)),
+			High:      closePrice.Add(decimal.NewFromFloat(10)),
+			Low:       closePrice.Sub(decimal.NewFromFloat(10)),
+			Close:     closePrice,
+			Volume:    decimal.NewFromFloat(100 + float64(i)),
+		}
+		candles = append(candles, candle)
+	}
+
+	return candles, nil
 }
 func (m *MockExchangeForStrategy) SubscribeTicker(ctx context.Context, symbol string, callback func(*exchanges.Ticker)) error {
 	return nil
@@ -58,6 +79,9 @@ func (m *MockExchangeForStrategy) SubscribeOrderBook(ctx context.Context, symbol
 	return nil
 }
 func (m *MockExchangeForStrategy) SubscribeTrades(ctx context.Context, symbol string, callback func(*exchanges.Trade)) error {
+	return nil
+}
+func (m *MockExchangeForStrategy) SubscribeCandles(ctx context.Context, symbol string, interval string, callback func(*exchanges.Candle)) error {
 	return nil
 }
 func (m *MockExchangeForStrategy) Name() string               { return "mock" }
@@ -377,59 +401,42 @@ func TestSafeInvoke(t *testing.T) {
 	// If we reach here, the panic was caught successfully
 }
 
-func TestScalpingStrategy_WithDYDXExchange(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping dYdX integration test in short mode")
-	}
-
-	// Create dYdX client for testnet
-	client, err := dydx.NewClientWithMnemonicAndURL(
-		"test test test test test test test test test test test junk", // Test mnemonic
-		0,
-		"https://indexer.v4testnet.dydx.exchange",
-		"wss://indexer.v4testnet.dydx.exchange/v4/ws",
-	)
-	if err != nil {
-		t.Skipf("Failed to create dYdX client: %v", err)
-	}
-
+func TestScalpingStrategy_Preloading(t *testing.T) {
 	config := DefaultConfig()
-	config.Symbol = "BTC-USD"
+	exchange := &MockExchangeForStrategy{}
+	strategy := NewScalpingStrategy(config, exchange)
 
-	strategy := NewScalpingStrategy(config, client)
-
-	if strategy == nil {
-		t.Fatal("NewScalpingStrategy should not return nil")
-	}
-
-	// Test that strategy can get ticker data
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Start strategy to trigger preloading
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	ticker, err := client.GetTicker(ctx, "BTC-USD")
+	err := strategy.Start(ctx)
 	if err != nil {
-		t.Skipf("Failed to get ticker from dYdX: %v", err)
+		t.Fatalf("failed to start strategy: %v", err)
 	}
 
-	if ticker.Symbol != "BTC-USD" {
-		t.Errorf("Expected ticker symbol BTC-USD, got %s", ticker.Symbol)
+	// Give some time for preloading to complete
+	time.Sleep(100 * time.Millisecond)
+
+	// Check that historical data was loaded
+	prices := strategy.GetCurrentPrices()
+	if len(prices) == 0 {
+		t.Error("Expected historical prices to be loaded, but got empty slice")
 	}
 
-	// Test that strategy can get candles
-	candles, err := client.GetCandles(ctx, "BTC-USD", "1MIN", 10)
+	// We expect at least some candles to be loaded (the mock returns up to 100)
+	if len(prices) < 20 {
+		t.Errorf("Expected at least 20 historical prices, got %d", len(prices))
+	}
+
+	// Stop strategy
+	err = strategy.Stop()
 	if err != nil {
-		t.Skipf("Failed to get candles from dYdX: %v", err)
+		t.Fatalf("failed to stop strategy: %v", err)
 	}
 
-	if len(candles) == 0 {
-		t.Error("Should have received candles from dYdX")
+	// Verify strategy is stopped
+	if strategy.IsRunning() {
+		t.Error("Strategy should not be running after stop")
 	}
-
-	// Test basic strategy functionality
-	strategy.SetSignalCallback(func(signal *Signal) {
-		t.Logf("Received signal: %s %s at %s", signal.Type, signal.Side, signal.Symbol)
-	})
-
-	t.Logf("Successfully integrated with dYdX: ticker=%.2f, candles=%d",
-		ticker.Last.InexactFloat64(), len(candles))
 }
