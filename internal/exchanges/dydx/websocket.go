@@ -10,6 +10,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/guyghost/constantine/internal/exchanges"
 	"github.com/guyghost/constantine/internal/telemetry"
+	"github.com/shopspring/decimal"
 )
 
 // WebSocketClient handles WebSocket connections for dYdX
