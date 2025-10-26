@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -13,7 +14,7 @@ import (
 // Model represents the TUI application model
 type Model struct {
 	// Bot state
-	aggregator   *exchanges.MultiExchangeAggregator
+	aggregator   *exchanges.ExchangeMultiplexer
 	strategy     *strategy.ScalpingStrategy
 	orderManager *order.Manager
 	riskManager  *risk.Manager
@@ -26,13 +27,13 @@ type Model struct {
 	lastUpdate time.Time
 
 	// Data
-	currentSignal *strategy.Signal
-	openOrders    []*exchanges.Order
-	positions     []*order.ManagedPosition
-	orderbook     *exchanges.OrderBook
-	riskStats     *risk.Stats
-	orderStats    *order.OrderStats
-	messages      []string
+	currentSignals map[string]interface{}
+	openOrders     []*exchanges.Order
+	positions      []*order.ManagedPosition
+	orderbook      *exchanges.OrderBook
+	riskStats      *risk.Stats
+	orderStats     *order.OrderStats
+	messages       []string
 
 	// Error handling
 	lastError error
@@ -49,23 +50,25 @@ const (
 	ViewOrders
 	ViewExchanges
 	ViewSettings
+	ViewSymbols
 )
 
 // NewModel creates a new TUI model
 func NewModel(
-	aggregator *exchanges.MultiExchangeAggregator,
+	aggregator *exchanges.ExchangeMultiplexer,
 	strategy *strategy.ScalpingStrategy,
 	orderManager *order.Manager,
 	riskManager *risk.Manager,
 ) Model {
 	return Model{
-		aggregator:   aggregator,
-		strategy:     strategy,
-		orderManager: orderManager,
-		riskManager:  riskManager,
-		activeView:   ViewDashboard,
-		messages:     make([]string, 0),
-		lastUpdate:   time.Now(),
+		aggregator:     aggregator,
+		strategy:       strategy,
+		orderManager:   orderManager,
+		riskManager:    riskManager,
+		activeView:     ViewDashboard,
+		currentSignals: make(map[string]interface{}),
+		messages:       make([]string, 0),
+		lastUpdate:     time.Now(),
 	}
 }
 
@@ -79,7 +82,10 @@ func (m Model) Init() tea.Cmd {
 
 // Message types for the TUI
 type tickMsg time.Time
-type signalMsg *strategy.Signal
+type signalMsg struct {
+	symbol string
+	signal interface{}
+}
 type orderUpdateMsg *order.OrderUpdate
 type positionUpdateMsg *order.ManagedPosition
 type errorMsg error
@@ -92,9 +98,9 @@ func tickCmd() tea.Cmd {
 }
 
 // SignalCmd creates a command for signal updates
-func SignalCmd(signal *strategy.Signal) tea.Cmd {
+func SignalCmd(symbol string, signal interface{}) tea.Cmd {
 	return func() tea.Msg {
-		return signalMsg(signal)
+		return signalMsg{symbol: symbol, signal: signal}
 	}
 }
 
@@ -169,10 +175,14 @@ func (m *Model) GetActiveView() View {
 	return m.activeView
 }
 
-// UpdateSignal updates the current signal
-func (m *Model) UpdateSignal(signal *strategy.Signal) {
-	m.currentSignal = signal
-	m.AddMessage("New signal: " + string(signal.Type) + " " + string(signal.Side))
+// UpdateSignal updates the current signal for a symbol
+func (m *Model) UpdateSignal(symbol string, signal interface{}) {
+	if signal == nil {
+		delete(m.currentSignals, symbol)
+	} else {
+		m.currentSignals[symbol] = signal
+	}
+	m.AddMessage(fmt.Sprintf("New signal for %s", symbol))
 }
 
 // UpdateOrders updates the open orders

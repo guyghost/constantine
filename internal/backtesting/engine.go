@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/guyghost/constantine/internal/config"
 	"github.com/guyghost/constantine/internal/exchanges"
 	"github.com/guyghost/constantine/internal/logger"
 	"github.com/guyghost/constantine/internal/strategy"
@@ -53,7 +54,7 @@ func (e *Engine) SetOnEquityUpdate(callback func(decimal.Decimal)) {
 }
 
 // Run executes the backtest
-func (e *Engine) Run(strategyConfig *strategy.Config) (*PerformanceMetrics, error) {
+func (e *Engine) Run(strategyConfig *config.Config) (*PerformanceMetrics, error) {
 	if len(e.data.Candles) == 0 {
 		return nil, fmt.Errorf("no historical data to backtest")
 	}

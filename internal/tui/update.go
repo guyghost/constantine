@@ -27,8 +27,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case signalMsg:
-		if msg != nil {
-			m.UpdateSignal(msg)
+		if msg.signal != nil {
+			m.UpdateSignal(msg.symbol, msg.signal)
 		}
 		return m, nil
 

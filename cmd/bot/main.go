@@ -23,6 +23,7 @@ import (
 	"github.com/guyghost/constantine/internal/order"
 	"github.com/guyghost/constantine/internal/risk"
 	"github.com/guyghost/constantine/internal/strategy"
+	"github.com/guyghost/constantine/internal/symbolmanager"
 	"github.com/guyghost/constantine/internal/telemetry"
 	"github.com/guyghost/constantine/internal/tui"
 	"github.com/joho/godotenv"
@@ -124,16 +125,16 @@ func run() error {
 	}()
 
 	// Initialize components
-	aggregator, strategyEngine, orderManager, riskManager, executionAgent, err := initializeBot(appConfig)
+	multiplexer, strategyEngine, orderManager, riskManager, executionAgent, err := initializeBot(appConfig)
 	if err != nil {
 		return fmt.Errorf("failed to initialize bot: %w", err)
 	}
 
 	// Connect to all exchanges
-	if err := aggregator.ConnectAll(ctx); err != nil {
+	if err := multiplexer.ConnectAll(ctx); err != nil {
 		return fmt.Errorf("failed to connect to exchanges: %w", err)
 	}
-	defer aggregator.DisconnectAll()
+	defer multiplexer.DisconnectAll()
 
 	// Setup callbacks
 	setupCallbacks(strategyEngine, orderManager, riskManager, executionAgent)
@@ -153,11 +154,11 @@ func run() error {
 
 	// Run in headless or TUI mode
 	if *headless {
-		return runHeadless(ctx, aggregator, strategyEngine, orderManager, riskManager, executionAgent)
+		return runHeadless(ctx, multiplexer, strategyEngine, orderManager, riskManager, executionAgent)
 	}
 
 	// Create TUI model
-	model := tui.NewModel(aggregator, strategyEngine, orderManager, riskManager)
+	model := tui.NewModel(multiplexer, strategyEngine, orderManager, riskManager)
 
 	// Start the TUI
 	p := tea.NewProgram(model, tea.WithAltScreen())
@@ -176,7 +177,7 @@ func botLogger() *logger.Logger {
 
 // initializeBot initializes all bot components
 func initializeBot(appConfig *config.AppConfig) (
-	*exchanges.MultiExchangeAggregator,
+	*exchanges.ExchangeMultiplexer,
 	*strategy.ScalpingStrategy,
 	*order.Manager,
 	*risk.Manager,
@@ -255,11 +256,37 @@ func initializeBot(appConfig *config.AppConfig) (
 	}
 
 	// Create aggregator
-	aggregator := exchanges.NewMultiExchangeAggregator(exchangesMap)
+	multiplexer := exchanges.NewExchangeMultiplexer()
+
+	// Add exchanges to multiplexer
+	for name, exchange := range exchangesMap {
+		multiplexer.AddExchange(name, exchange)
+	}
+
+	// Map symbol to primary exchange (for now, use the first one)
+	var primaryExchangeName string
+	for name := range exchangesMap {
+		primaryExchangeName = name
+		break
+	}
+	if err := multiplexer.MapSymbol(appConfig.StrategySymbol, primaryExchangeName); err != nil {
+		return nil, nil, nil, nil, nil, fmt.Errorf("failed to map symbol: %w", err)
+	}
 
 	// Create strategy configuration
-	strategyConfig := strategy.DefaultConfig()
+	strategyConfig := config.DefaultConfig()
 	strategyConfig.Symbol = appConfig.StrategySymbol
+
+	// Initialize multi-symbol components (for future use)
+	symbolManager := symbolmanager.NewSymbolManager()
+	symbolConfig := symbolmanager.SymbolConfig{
+		Symbol:         appConfig.StrategySymbol,
+		StrategyConfig: strategyConfig,
+		Enabled:        true,
+	}
+	_ = symbolManager.AddSymbol(appConfig.StrategySymbol, symbolConfig)
+	strategyOrchestrator := strategy.NewStrategyOrchestrator(symbolManager)
+	_ = strategyOrchestrator // TODO: use in future
 
 	// Use the first enabled exchange as primary for strategy and order manager
 	var primaryExchange exchanges.Exchange
@@ -282,7 +309,7 @@ func initializeBot(appConfig *config.AppConfig) (
 	executionConfig := execution.DefaultConfig()
 	executionAgent := execution.NewExecutionAgent(orderManager, riskManager, executionConfig)
 
-	return aggregator, strategyEngine, orderManager, riskManager, executionAgent, nil
+	return multiplexer, strategyEngine, orderManager, riskManager, executionAgent, nil
 }
 
 // setupCallbacks sets up callbacks between components
@@ -396,7 +423,7 @@ func startBotComponents(
 // runHeadless runs the bot in headless mode with periodic status updates
 func runHeadless(
 	ctx context.Context,
-	aggregator *exchanges.MultiExchangeAggregator,
+	multiplexer *exchanges.ExchangeMultiplexer,
 	strategyEngine *strategy.ScalpingStrategy,
 	orderManager *order.Manager,
 	riskManager *risk.Manager,
@@ -420,23 +447,23 @@ func runHeadless(
 
 		case <-ticker.C:
 			// Refresh data from all exchanges
-			if err := aggregator.RefreshData(ctx); err != nil {
+			if err := multiplexer.RefreshData(ctx); err != nil {
 				log.Error("headless refresh failed", "error", err)
 			}
 
 			// Log periodic status updates
-			logAggregatedStatus(aggregator, orderManager, riskManager)
+			logAggregatedStatus(multiplexer, orderManager, riskManager)
 		}
 	}
 }
 
 // logAggregatedStatus logs the current aggregated status of all exchanges
 func logAggregatedStatus(
-	aggregator *exchanges.MultiExchangeAggregator,
+	multiplexer *exchanges.ExchangeMultiplexer,
 	orderManager *order.Manager,
 	riskManager *risk.Manager,
 ) {
-	data := aggregator.GetAggregatedData()
+	data := multiplexer.GetAggregatedData()
 	log := botLogger()
 
 	// Check if sensitive data logging is enabled

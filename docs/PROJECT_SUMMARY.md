@@ -6,15 +6,85 @@ A complete, production-ready cryptocurrency scalping bot with multi-exchange sup
 
 ## Project Statistics
 
-- **Total Files**: 25+ files
-- **Go Source Files**: 21
-- **Lines of Code**: ~5,000+
+- **Total Files**: 30+ files
+- **Go Source Files**: 26
+- **Lines of Code**: ~6,000+
 - **Exchanges Supported**: 3 (Hyperliquid, Coinbase, dYdX)
 - **Technical Indicators**: 8+
-- **Architecture**: Clean, modular, extensible
+- **Architecture**: Clean, modular, extensible, multi-symbol ready
 
 ## Complete File Structure
 
+```
+scalping-bot/
+├── cmd/bot/
+│   └── main.go                        # Application entry point (340 lines)
+│
+├── internal/
+│   ├── exchanges/
+│   │   ├── interface.go               # Exchange interface & types (200 lines)
+│   │   ├── multiplexer.go             # Multi-exchange aggregator (180 lines)
+│   │   ├── hyperliquid/
+│   │   │   ├── client.go              # Hyperliquid REST client (200 lines)
+│   │   │   └── websocket.go           # Hyperliquid WebSocket (220 lines)
+│   │   ├── coinbase/
+│   │   │   ├── client.go              # Coinbase REST client (200 lines)
+│   │   │   └── websocket.go           # Coinbase WebSocket (230 lines)
+│   │   └── dydx/
+│   │       ├── client.go              # dYdX REST client (200 lines)
+│   │       └── websocket.go           # dYdX WebSocket (220 lines)
+│   │
+│   ├── strategy/
+│   │   ├── scalping.go                # Main scalping strategy (300 lines)
+│   │   ├── indicators.go              # Technical indicators (280 lines)
+│   │   ├── signals.go                 # Signal generation (260 lines)
+│   │   └── orchestrator.go            # Multi-symbol strategy orchestration (150 lines)
+│   │
+│   ├── symbolmanager/
+│   │   └── symbolmanager.go           # Symbol configuration management (200 lines)
+│   │
+│   ├── execution/
+│   │   └── execution.go               # Automated order execution (180 lines)
+│   │
+│   ├── portfolio/
+│   │   └── portfolio.go               # Portfolio-level position tracking (120 lines)
+│   │
+│   ├── order/
+│   │   ├── manager.go                 # Order manager (350 lines)
+│   │   └── types.go                   # Order types (100 lines)
+│   │
+│   ├── risk/
+│   │   └── manager.go                 # Risk manager (360 lines)
+│   │
+│   ├── circuitbreaker/
+│   │   └── circuitbreaker.go          # Circuit breaker pattern (100 lines)
+│   │
+│   ├── config/
+│   │   └── config.go                  # Configuration management (250 lines)
+│   │
+│   ├── logger/
+│   │   └── logger.go                  # Structured logging (100 lines)
+│   │
+│   └── tui/
+│       ├── model.go                   # TUI model (200 lines)
+│       ├── update.go                  # Update logic (120 lines)
+│       ├── view.go                    # View rendering (300 lines)
+│       └── components/
+│           ├── dashboard.go           # Dashboard components (140 lines)
+│           ├── orderbook.go           # Order book display (150 lines)
+│           └── positions.go           # Position display (220 lines)
+│
+├── pkg/utils/
+│   └── math.go                        # Math utilities (80 lines)
+│
+├── go.mod                             # Go module definition
+├── go.sum                             # Go module checksums
+├── Makefile                           # Build automation
+├── README.md                          # Main documentation
+├── QUICKSTART.md                      # Quick start guide
+├── PROJECT_SUMMARY.md                 # This file
+├── .gitignore                         # Git ignore rules
+├── .env.example                       # Environment variables template
 ```
 scalping-bot/
 ├── cmd/bot/
@@ -71,7 +141,7 @@ scalping-bot/
 
 ### 1. Exchange Layer (`internal/exchanges/`)
 
-**Purpose**: Abstract interface for multiple cryptocurrency exchanges
+**Purpose**: Abstract interface for multiple cryptocurrency exchanges with multi-exchange aggregation
 
 **Features**:
 - Unified interface for all exchanges
@@ -80,18 +150,32 @@ scalping-bot/
 - Order management
 - Position tracking
 - Balance monitoring
+- Multi-exchange multiplexing
+- Symbol-to-exchange mapping
 
 **Exchanges**:
 - ✅ Hyperliquid
 - ✅ Coinbase Advanced Trade
 - ✅ dYdX v4
 
-### 2. Strategy Layer (`internal/strategy/`)
+### 2. Symbol Management (`internal/symbolmanager/`)
 
-**Purpose**: Trading logic and signal generation
+**Purpose**: Multi-symbol configuration and management
+
+**Features**:
+- Per-symbol strategy configuration
+- Risk limits per symbol
+- Exchange priority mapping
+- Dynamic symbol enable/disable
+- Configuration persistence
+
+### 3. Strategy Layer (`internal/strategy/`)
+
+**Purpose**: Trading logic and signal generation with multi-symbol orchestration
 
 **Components**:
 - **Scalping Strategy**: Main trading logic with EMA crossover
+- **Strategy Orchestrator**: Multi-symbol strategy coordination
 - **Indicators**: 8+ technical indicators (EMA, RSI, MACD, BB, ATR, VWAP, Stochastic)
 - **Signals**: Entry/exit signal generation with strength calculation
 
@@ -101,6 +185,28 @@ scalping-bot/
 - Order book imbalance detection
 - Multi-factor signal confirmation
 - Configurable parameters
+- Multi-symbol signal processing
+
+### 4. Execution Layer (`internal/execution/`)
+
+**Purpose**: Automated order execution based on trading signals
+
+**Features**:
+- Signal-to-order conversion
+- Risk-validated execution
+- Stop-loss/take-profit management
+- Position sizing
+- Execution callbacks
+
+### 5. Portfolio Management (`internal/portfolio/`)
+
+**Purpose**: Portfolio-level position and balance tracking
+
+**Features**:
+- Multi-symbol position aggregation
+- Portfolio-level P&L calculation
+- Balance monitoring across exchanges
+- Risk exposure tracking
 
 ### 3. Order Management (`internal/order/`)
 
@@ -230,28 +336,53 @@ scalping-bot/
 ### Environment Variables
 
 ```env
-EXCHANGE                  # Exchange selection
-EXCHANGE_API_KEY          # API credentials
-EXCHANGE_API_SECRET
-TRADING_SYMBOL            # Symbol to trade
-INITIAL_BALANCE           # Starting balance
-SHORT_EMA_PERIOD          # Fast EMA period
-LONG_EMA_PERIOD           # Slow EMA period
-RSI_PERIOD                # RSI calculation period
-RSI_OVERSOLD              # RSI oversold level
-RSI_OVERBOUGHT            # RSI overbought level
-TAKE_PROFIT_PERCENT       # Take profit %
-STOP_LOSS_PERCENT         # Stop loss %
-MAX_POSITION_SIZE         # Max position size
-MAX_POSITIONS             # Max concurrent positions
-MAX_LEVERAGE              # Max leverage
-MAX_DAILY_LOSS            # Daily loss limit
-MAX_DRAWDOWN              # Drawdown limit %
-RISK_PER_TRADE            # Risk per trade %
-MIN_ACCOUNT_BALANCE       # Minimum balance
-DAILY_TRADING_LIMIT       # Max trades/day
-COOLDOWN_PERIOD_MINUTES   # Cooldown duration
-CONSECUTIVE_LOSS_LIMIT    # Losses before cooldown
+# Application
+APP_ENV=development
+TELEMETRY_ADDR=:9100
+LOG_LEVEL=info
+LOG_FORMAT=json
+LOG_ADD_SOURCE=false
+LOG_SENSITIVE_DATA=false
+
+# Trading Configuration
+STRATEGY_SYMBOL=BTC-USD
+TRADING_SYMBOLS=BTC-USD,ETH-USD  # Multi-symbol support
+INITIAL_BALANCE=10000
+
+# Strategy Parameters (global defaults)
+STRATEGY_SHORT_EMA=9
+STRATEGY_LONG_EMA=21
+STRATEGY_RSI_PERIOD=14
+STRATEGY_RSI_OVERSOLD=30
+STRATEGY_RSI_OVERBOUGHT=70
+STRATEGY_TAKE_PROFIT=2.0
+STRATEGY_STOP_LOSS=1.0
+STRATEGY_MAX_POSITION_SIZE=0.1
+STRATEGY_UPDATE_INTERVAL=1s
+STRATEGY_MAX_PRICE_CHANGE_PERCENT=5.0
+
+# Risk Management
+RISK_MAX_DAILY_LOSS=0.05
+RISK_MAX_POSITION_SIZE=0.1
+RISK_MAX_CONSECUTIVE_LOSSES=3
+
+# Execution
+EXECUTION_AUTO_TRADE=true
+EXECUTION_MIN_SIGNAL_STRENGTH=0.5
+
+# Exchange Configurations
+ENABLE_HYPERLIQUID=true
+HYPERLIQUID_API_KEY=...
+HYPERLIQUID_API_SECRET=...
+
+ENABLE_COINBASE=false
+COINBASE_API_KEY=...
+COINBASE_API_SECRET=...
+COINBASE_PORTFOLIO_ID=...
+
+ENABLE_DYDX=true
+DYDX_MNEMONIC=...
+DYDX_SUBACCOUNT_NUMBER=0
 ```
 
 ## Building and Running
@@ -303,6 +434,7 @@ Generates binaries for:
 
 ### Trading Features
 ✅ Multi-exchange support
+✅ Multi-symbol support
 ✅ Real-time market data
 ✅ Automated order placement
 ✅ Position management
@@ -396,7 +528,7 @@ Generates binaries for:
 - [ ] Strategy optimization
 
 ### Potential Improvements
-- [ ] Multi-symbol support
+- [x] Multi-symbol support
 - [ ] Portfolio management
 - [ ] Advanced risk models
 - [ ] Custom indicator builder

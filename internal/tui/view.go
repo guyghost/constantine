@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/guyghost/constantine/internal/exchanges"
+	"github.com/guyghost/constantine/internal/strategy"
 	"github.com/shopspring/decimal"
 )
 
@@ -70,6 +71,8 @@ func (m Model) View() string {
 		content = m.renderExchanges()
 	case ViewSettings:
 		content = m.renderSettings()
+	case ViewSymbols:
+		content = m.renderSymbols()
 	}
 
 	// Render header
@@ -151,15 +154,12 @@ func (m Model) renderDashboard() string {
 	// Current signal
 	signalBox := m.renderCurrentSignal()
 
-	// Risk stats
-	riskBox := m.renderRiskStats()
-
 	// Recent messages
 	messagesBox := m.renderMessages()
 
 	// Arrange in grid
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, summary, "  ", signalBox)
-	middleRow := lipgloss.JoinHorizontal(lipgloss.Top, riskBox, "  ", messagesBox)
+	middleRow := messagesBox
 
 	return lipgloss.JoinVertical(lipgloss.Left, topRow, "", middleRow)
 }
@@ -210,46 +210,28 @@ func (m Model) renderSummary() string {
 func (m Model) renderCurrentSignal() string {
 	var content strings.Builder
 
-	content.WriteString(headerStyle.Render("Current Signal") + "\n\n")
+	content.WriteString(headerStyle.Render("Active Signals") + "\n\n")
 
-	if m.currentSignal != nil && m.currentSignal.Type != "none" {
-		sideStyle := successStyle
-		if m.currentSignal.Side == "sell" {
-			sideStyle = errorStyle
+	if len(m.currentSignals) == 0 {
+		content.WriteString(mutedStyle.Render("No active signals"))
+	} else {
+		for symbol, sig := range m.currentSignals {
+			// Type assertion to strategy.Signal
+			if signal, ok := sig.(*strategy.Signal); ok {
+				sideStyle := successStyle
+				if signal.Side == "sell" {
+					sideStyle = errorStyle
+				}
+
+				content.WriteString(fmt.Sprintf("%s: %s %s\n",
+					symbol,
+					signal.Type,
+					sideStyle.Render(string(signal.Side))))
+				content.WriteString(fmt.Sprintf("  Price: $%s\n", signal.Price.StringFixed(2)))
+				content.WriteString(fmt.Sprintf("  Strength: %.1f%%\n", signal.Strength*100))
+				content.WriteString("\n")
+			}
 		}
-
-		content.WriteString(fmt.Sprintf("Type:     %s\n", m.currentSignal.Type))
-		content.WriteString(fmt.Sprintf("Side:     %s\n", sideStyle.Render(string(m.currentSignal.Side))))
-		content.WriteString(fmt.Sprintf("Symbol:   %s\n", m.currentSignal.Symbol))
-		content.WriteString(fmt.Sprintf("Price:    $%s\n", m.currentSignal.Price.StringFixed(2)))
-		content.WriteString(fmt.Sprintf("Strength: %.1f%%\n", m.currentSignal.Strength*100))
-		content.WriteString(fmt.Sprintf("Reason:   %s\n", mutedStyle.Render(m.currentSignal.Reason)))
-	} else {
-		content.WriteString(mutedStyle.Render("No active signal"))
-	}
-
-	return boxStyle.Render(content.String())
-}
-
-// renderRiskStats renders risk statistics
-func (m Model) renderRiskStats() string {
-	var content strings.Builder
-
-	content.WriteString(headerStyle.Render("Risk Management") + "\n\n")
-
-	if m.riskStats != nil {
-		winRate := fmt.Sprintf("%.1f%%", m.riskStats.WinRate)
-		content.WriteString(fmt.Sprintf("Win Rate:    %s\n", successStyle.Render(winRate)))
-
-		content.WriteString(fmt.Sprintf("Total Trades: %d\n", m.riskStats.TotalTrades))
-		content.WriteString(fmt.Sprintf("Wins:        %s\n", successStyle.Render(fmt.Sprintf("%d", m.riskStats.WinningTrades))))
-		content.WriteString(fmt.Sprintf("Losses:      %s\n", errorStyle.Render(fmt.Sprintf("%d", m.riskStats.LosingTrades))))
-		content.WriteString(fmt.Sprintf("Consecutive: %d\n", m.riskStats.ConsecutiveLosses))
-
-		pf := fmt.Sprintf("%.2f", m.riskStats.ProfitFactor)
-		content.WriteString(fmt.Sprintf("Profit Factor: %s\n", successStyle.Render(pf)))
-	} else {
-		content.WriteString(mutedStyle.Render("No risk data available"))
 	}
 
 	return boxStyle.Render(content.String())
@@ -428,6 +410,36 @@ func (m Model) renderExchanges() string {
 		}
 
 		content.WriteString("\n")
+	}
+
+	return boxStyle.Render(content.String())
+}
+
+// renderSymbols renders the symbols view
+func (m Model) renderSymbols() string {
+	var content strings.Builder
+
+	content.WriteString(headerStyle.Render("Trading Symbols") + "\n\n")
+
+	// For now, show active signals as symbols
+	if len(m.currentSignals) == 0 {
+		content.WriteString(mutedStyle.Render("No active symbols"))
+	} else {
+		for symbol, sig := range m.currentSignals {
+			if signal, ok := sig.(*strategy.Signal); ok {
+				sideStyle := successStyle
+				if signal.Side == exchanges.OrderSideSell {
+					sideStyle = errorStyle
+				}
+
+				content.WriteString(fmt.Sprintf("📊 %s\n", symbol))
+				content.WriteString(fmt.Sprintf("  Signal: %s %s\n",
+					signal.Type,
+					sideStyle.Render(string(signal.Side))))
+				content.WriteString(fmt.Sprintf("  Strength: %.1f%%\n", signal.Strength*100))
+				content.WriteString("\n")
+			}
+		}
 	}
 
 	return boxStyle.Render(content.String())

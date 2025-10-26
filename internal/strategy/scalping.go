@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/guyghost/constantine/internal/config"
 	"github.com/guyghost/constantine/internal/exchanges"
 	"github.com/guyghost/constantine/internal/logger"
 	"github.com/guyghost/constantine/internal/telemetry"
@@ -38,103 +39,9 @@ func parseFloatEnv(key string, defaultValue float64) float64 {
 	return defaultValue
 }
 
-// Config holds strategy configuration
-type Config struct {
-	Symbol            string
-	ShortEMAPeriod    int
-	LongEMAPeriod     int
-	RSIPeriod         int
-	RSIOversold       float64
-	RSIOverbought     float64
-	TakeProfitPercent float64
-	StopLossPercent   float64
-	MaxPositionSize   decimal.Decimal
-	MinPriceMove      decimal.Decimal
-	UpdateInterval    time.Duration
-	// Price sanity checks
-	MaxPriceChangePercent float64 // Maximum allowed price change between updates (default: 5%)
-	MinPrice              decimal.Decimal
-	MaxPrice              decimal.Decimal
-}
-
-// DefaultConfig returns default strategy configuration
-func DefaultConfig() *Config {
-	cfg := &Config{
-		Symbol:                "BTC-USD",
-		ShortEMAPeriod:        9,
-		LongEMAPeriod:         21,
-		RSIPeriod:             14,
-		RSIOversold:           30.0,
-		RSIOverbought:         70.0,
-		TakeProfitPercent:     0.5,
-		StopLossPercent:       0.25,
-		MaxPositionSize:       decimal.NewFromFloat(0.1),
-		MinPriceMove:          decimal.NewFromFloat(0.01),
-		UpdateInterval:        1 * time.Second,
-		MaxPriceChangePercent: 5.0,                           // 5% max price change
-		MinPrice:              decimal.NewFromFloat(0.01),    // Minimum valid price
-		MaxPrice:              decimal.NewFromFloat(1000000), // Maximum valid price
-	}
-
-	if symbol := os.Getenv("STRATEGY_SYMBOL"); symbol != "" {
-		cfg.Symbol = symbol
-	}
-	if val := parseIntEnv("STRATEGY_SHORT_EMA", cfg.ShortEMAPeriod); val > 0 {
-		cfg.ShortEMAPeriod = val
-	}
-	if val := parseIntEnv("STRATEGY_LONG_EMA", cfg.LongEMAPeriod); val > 0 {
-		cfg.LongEMAPeriod = val
-	}
-	if val := parseIntEnv("STRATEGY_RSI_PERIOD", cfg.RSIPeriod); val > 0 {
-		cfg.RSIPeriod = val
-	}
-	if val := parseFloatEnv("STRATEGY_RSI_OVERSOLD", cfg.RSIOversold); val > 0 {
-		cfg.RSIOversold = val
-	}
-	if val := parseFloatEnv("STRATEGY_RSI_OVERBOUGHT", cfg.RSIOverbought); val > 0 {
-		cfg.RSIOverbought = val
-	}
-	if val := parseFloatEnv("STRATEGY_TAKE_PROFIT", cfg.TakeProfitPercent); val > 0 {
-		cfg.TakeProfitPercent = val
-	}
-	if val := parseFloatEnv("STRATEGY_STOP_LOSS", cfg.StopLossPercent); val > 0 {
-		cfg.StopLossPercent = val
-	}
-	if value := os.Getenv("STRATEGY_MAX_POSITION_SIZE"); value != "" {
-		if parsed, err := decimal.NewFromString(value); err == nil {
-			cfg.MaxPositionSize = parsed
-		}
-	}
-	if value := os.Getenv("STRATEGY_MIN_PRICE_MOVE"); value != "" {
-		if parsed, err := decimal.NewFromString(value); err == nil {
-			cfg.MinPriceMove = parsed
-		}
-	}
-	if duration := os.Getenv("STRATEGY_UPDATE_INTERVAL"); duration != "" {
-		if parsed, err := time.ParseDuration(duration); err == nil {
-			cfg.UpdateInterval = parsed
-		}
-	}
-	if val := parseFloatEnv("STRATEGY_MAX_PRICE_CHANGE_PERCENT", cfg.MaxPriceChangePercent); val > 0 {
-		cfg.MaxPriceChangePercent = val
-	}
-	if value := os.Getenv("STRATEGY_MIN_PRICE"); value != "" {
-		if parsed, err := decimal.NewFromString(value); err == nil && parsed.GreaterThan(decimal.Zero) {
-			cfg.MinPrice = parsed
-		}
-	}
-	if value := os.Getenv("STRATEGY_MAX_PRICE"); value != "" {
-		if parsed, err := decimal.NewFromString(value); err == nil && parsed.GreaterThan(decimal.Zero) {
-			cfg.MaxPrice = parsed
-		}
-	}
-
-	return cfg
-}
-
 // ScalpingStrategy implements a scalping trading strategy
 type ScalpingStrategy struct {
-	config          *Config
+	config          *config.Config
 	exchange        exchanges.Exchange
 	signalGenerator *SignalGenerator
 	mu              sync.RWMutex
@@ -157,7 +64,7 @@ type ScalpingStrategy struct {
 }
 
 // NewScalpingStrategy creates a new scalping strategy
-func NewScalpingStrategy(config *Config, exchange exchanges.Exchange) *ScalpingStrategy {
+func NewScalpingStrategy(config *config.Config, exchange exchanges.Exchange) *ScalpingStrategy {
 	return &ScalpingStrategy{
 		config:          config,
 		exchange:        exchange,
@@ -272,7 +179,7 @@ func (s *ScalpingStrategy) IsRunning() bool {
 // GetConfig returns the strategy configuration
 // This method provides access to the strategy's configuration parameters
 // for use by other components like the backtesting engine
-func (s *ScalpingStrategy) GetConfig() *Config {
+func (s *ScalpingStrategy) GetConfig() *config.Config {
 	return s.config
 }
 
@@ -585,11 +492,54 @@ func (s *ScalpingStrategy) emitError(err error) {
 	}
 }
 
-// GetLastSignal returns the last generated signal
-func (s *ScalpingStrategy) GetLastSignal() *Signal {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.lastSignal
+// ProcessCandle processes a new candle for the strategy
+func (s *ScalpingStrategy) ProcessCandle(candle exchanges.Candle) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	logger.Component("strategy").Debug("processing candle",
+		"symbol", candle.Symbol,
+		"timestamp", candle.Timestamp,
+		"open", candle.Open.String(),
+		"high", candle.High.String(),
+		"low", candle.Low.String(),
+		"close", candle.Close.String(),
+		"volume", candle.Volume.String())
+
+	// Price sanity checks on close price
+	if !s.validatePrice(candle.Close) {
+		s.emitError(fmt.Errorf("price validation failed for %s: close=%s", s.config.Symbol, candle.Close))
+		return
+	}
+
+	// Check for abnormal price movements
+	if len(s.prices) > 0 {
+		lastPrice := s.prices[len(s.prices)-1]
+		if !s.validatePriceChange(lastPrice, candle.Close) {
+			s.emitError(fmt.Errorf("abnormal price movement detected for %s: %s -> %s",
+				s.config.Symbol, lastPrice, candle.Close))
+			return
+		}
+	}
+
+	// Update price history with close price
+	s.prices = append(s.prices, candle.Close)
+
+	// Update volume history
+	s.volumes = append(s.volumes, candle.Volume)
+
+	// Keep only last 100 entries
+	if len(s.prices) > 100 {
+		s.prices = s.prices[1:]
+	}
+	if len(s.volumes) > 100 {
+		s.volumes = s.volumes[1:]
+	}
+
+	logger.Component("strategy").Debug("candle processed",
+		"symbol", s.config.Symbol,
+		"prices_count", len(s.prices),
+		"volumes_count", len(s.volumes))
 }
 
 // GetCurrentPrices returns the current price history

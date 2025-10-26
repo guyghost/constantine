@@ -3,6 +3,7 @@ package strategy
 import (
 	"fmt"
 
+	"github.com/guyghost/constantine/internal/config"
 	"github.com/guyghost/constantine/internal/exchanges"
 	"github.com/shopspring/decimal"
 )
@@ -31,11 +32,11 @@ const (
 
 // SignalGenerator generates trading signals
 type SignalGenerator struct {
-	config *Config
+	config *config.Config
 }
 
 // NewSignalGenerator creates a new signal generator
-func NewSignalGenerator(config *Config) *SignalGenerator {
+func NewSignalGenerator(config *config.Config) *SignalGenerator {
 	return &SignalGenerator{
 		config: config,
 	}

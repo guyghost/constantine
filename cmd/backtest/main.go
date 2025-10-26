@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/guyghost/constantine/internal/backtesting"
-	"github.com/guyghost/constantine/internal/strategy"
+	"github.com/guyghost/constantine/internal/config"
 	"github.com/shopspring/decimal"
 )
 
@@ -97,7 +97,7 @@ func run() error {
 	}
 
 	// Create strategy config
-	stratConfig := strategy.DefaultConfig()
+	stratConfig := config.DefaultConfig()
 	stratConfig.Symbol = *symbol
 	stratConfig.ShortEMAPeriod = *shortEMA
 	stratConfig.LongEMAPeriod = *longEMA
