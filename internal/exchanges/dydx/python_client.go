@@ -16,11 +16,11 @@ import (
 // PythonClient wraps the official dYdX v4 Python client for order placement
 // This is a temporary solution until we have native Go proto support
 type PythonClient struct {
-	pythonPath       string
-	scriptPath       string
-	scriptPathVerified bool // Security flag to ensure path was validated
-	network          string // "testnet" or "mainnet"
-	mnemonic         string
+	pythonPath         string
+	scriptPath         string
+	scriptPathVerified bool   // Security flag to ensure path was validated
+	network            string // "testnet" or "mainnet"
+	mnemonic           string
 }
 
 // PythonClientConfig contains configuration for the Python client wrapper

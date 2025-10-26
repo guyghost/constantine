@@ -16,7 +16,7 @@ import (
 
 func main() {
 	fmt.Println("🚀 dYdX v4 Testnet - Test de Trading Complet")
-	fmt.Println("============================================\n")
+	fmt.Println("============================================")
 
 	// Charger les variables d'environnement
 	if err := godotenv.Load(); err != nil {

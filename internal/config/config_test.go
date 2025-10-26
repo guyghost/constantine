@@ -17,8 +17,8 @@ func TestLoad_SucceedsWithRequiredSecrets(t *testing.T) {
 		t.Fatalf("expected config to load, got error: %v", err)
 	}
 
-	hl := cfg.Exchanges["hyperliquid"]
-	if hl == nil || hl.APIKey != "test-key" || hl.APISecret != "test-secret" {
+	hl, ok := cfg.Exchanges["hyperliquid"]
+	if !ok || hl.APIKey != "test-key" || hl.APISecret != "test-secret" {
 		t.Fatalf("hyperliquid config not populated correctly: %+v", hl)
 	}
 }

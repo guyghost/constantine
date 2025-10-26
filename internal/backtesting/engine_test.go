@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	strategyconfig "github.com/guyghost/constantine/internal/config"
 	"github.com/guyghost/constantine/internal/exchanges"
 	"github.com/guyghost/constantine/internal/exchanges/dydx"
 	"github.com/guyghost/constantine/internal/strategy"
@@ -359,7 +360,7 @@ func TestEngine_WithDYDXData(t *testing.T) {
 	}
 
 	// Create strategy config
-	stratConfig := &strategy.Config{
+	stratConfig := &strategyconfig.Config{
 		Symbol:            "BTC-USD",
 		ShortEMAPeriod:    9,
 		LongEMAPeriod:     21,
