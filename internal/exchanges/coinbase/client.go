@@ -891,8 +891,74 @@ func (c *Client) GetOpenOrders(ctx context.Context, symbol string) ([]exchanges.
 
 // GetOrderHistory retrieves order history
 func (c *Client) GetOrderHistory(ctx context.Context, symbol string, limit int) ([]exchanges.Order, error) {
-	// TODO: Implement REST API call
-	return []exchanges.Order{}, nil
+	var response CoinbaseListOrdersResponse
+	path := "/brokerage/orders/historical/batch"
+
+	// Add query parameters for historical orders (all statuses except OPEN)
+	queryParams := fmt.Sprintf("?limit=%d", limit)
+	if symbol != "" {
+		queryParams += "&product_id=" + symbol
+	}
+
+	// Get all orders (FILLED, CANCELLED, EXPIRED, etc.) - exclude OPEN which is handled by GetOpenOrders
+	// Note: Coinbase API returns orders sorted by most recent first
+
+	err := c.httpClient.doRequest(ctx, "GET", path+queryParams, nil, &response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get order history: %w", err)
+	}
+
+	orders := make([]exchanges.Order, 0, len(response.Orders))
+	for _, cbOrder := range response.Orders {
+		// Filter out OPEN orders (those are returned by GetOpenOrders)
+		if cbOrder.Status == "OPEN" {
+			continue
+		}
+
+		order := exchanges.Order{
+			ID:        cbOrder.OrderID,
+			Symbol:    cbOrder.ProductID,
+			Status:    mapCoinbaseStatus(cbOrder.Status),
+			CreatedAt: parseTimeString(cbOrder.CreatedTime),
+			UpdatedAt: time.Now(),
+		}
+
+		// Parse side
+		if cbOrder.Side == "BUY" {
+			order.Side = exchanges.OrderSideBuy
+		} else {
+			order.Side = exchanges.OrderSideSell
+		}
+
+		// Parse order configuration
+		if cbOrder.OrderConfiguration.MarketMarketIOC != nil {
+			order.Type = exchanges.OrderTypeMarket
+			if cbOrder.OrderConfiguration.MarketMarketIOC.BaseSize != "" {
+				order.Amount, _ = decimal.NewFromString(cbOrder.OrderConfiguration.MarketMarketIOC.BaseSize)
+			}
+		} else if cbOrder.OrderConfiguration.LimitLimitGTC != nil {
+			order.Type = exchanges.OrderTypeLimit
+			order.Amount, _ = decimal.NewFromString(cbOrder.OrderConfiguration.LimitLimitGTC.BaseSize)
+			order.Price, _ = decimal.NewFromString(cbOrder.OrderConfiguration.LimitLimitGTC.LimitPrice)
+		}
+
+		// Parse filled information
+		if cbOrder.FilledSize != "" {
+			order.FilledAmount, _ = decimal.NewFromString(cbOrder.FilledSize)
+		}
+		if cbOrder.AverageFilledPrice != "" {
+			order.AveragePrice, _ = decimal.NewFromString(cbOrder.AverageFilledPrice)
+		}
+
+		orders = append(orders, order)
+
+		// Respect limit
+		if len(orders) >= limit {
+			break
+		}
+	}
+
+	return orders, nil
 }
 
 // CoinbaseAccountsResponse represents the response from Coinbase accounts API
@@ -996,8 +1062,22 @@ func (c *Client) GetPositions(ctx context.Context) ([]exchanges.Position, error)
 
 // GetPosition retrieves a specific position
 func (c *Client) GetPosition(ctx context.Context, symbol string) (*exchanges.Position, error) {
-	// TODO: Implement REST API call
-	return nil, nil
+	// For Coinbase spot trading, positions are derived from balances
+	// Get all positions and filter by symbol
+	positions, err := c.GetPositions(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Find position matching the symbol
+	for _, position := range positions {
+		if position.Symbol == symbol {
+			return &position, nil
+		}
+	}
+
+	// No position found for this symbol
+	return nil, fmt.Errorf("no position found for symbol: %s", symbol)
 }
 
 // SupportedSymbols returns list of supported trading symbols
