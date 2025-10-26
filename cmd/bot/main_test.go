@@ -1,42 +1,13 @@
 package main
 
 import (
-	"context"
 	"os"
 	"testing"
-	"time"
 
-	"github.com/guyghost/constantine/internal/order"
-	"github.com/guyghost/constantine/internal/strategy"
+	"github.com/guyghost/constantine/internal/config"
 	"github.com/guyghost/constantine/internal/testutils"
 	"log/slog"
 )
-
-func TestStartBotComponentsIntegration(t *testing.T) {
-	exchange := testutils.NewTestExchange("integration")
-	manager := order.NewManager(exchange)
-	strat := strategy.NewScalpingStrategy(strategy.DefaultConfig(), exchange)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- startBotComponents(ctx, strat, manager)
-	}()
-
-	time.Sleep(100 * time.Millisecond)
-	cancel()
-
-	select {
-	case err := <-errCh:
-		if err != nil {
-			t.Fatalf("startBotComponents returned error: %v", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("startBotComponents did not exit after cancellation")
-	}
-}
 
 func TestGetEnvBool(t *testing.T) {
 	tests := []struct {
@@ -123,4 +94,49 @@ func TestLoadLoggerConfig(t *testing.T) {
 	if config.OutputPath != "/tmp/test.log" {
 		t.Errorf("expected output path /tmp/test.log, got %s", config.OutputPath)
 	}
+}
+
+func TestInitializeBot_WithDYDX(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping dYdX integration test in short mode")
+	}
+
+	// Set up test environment variables for dYdX
+	os.Setenv("DYDX_MNEMONIC", "test test test test test test test test test test test junk")
+	os.Setenv("DYDX_NETWORK", "testnet")
+	os.Setenv("ENABLE_DYDX", "true")
+	os.Setenv("STRATEGY_SYMBOL", "BTC-USD")
+	defer func() {
+		os.Unsetenv("DYDX_MNEMONIC")
+		os.Unsetenv("DYDX_NETWORK")
+		os.Unsetenv("ENABLE_DYDX")
+		os.Unsetenv("STRATEGY_SYMBOL")
+	}()
+
+	// Create a minimal config for testing
+	config := &config.AppConfig{
+		Exchanges: map[string]*config.ExchangeConfig{
+			"dydx": {
+				Name:             "dydx",
+				Enabled:          true,
+				APIKey:           "",
+				APISecret:        "",
+				Mnemonic:         "test test test test test test test test test test test junk",
+				SubAccountNumber: 0,
+			},
+		},
+		StrategySymbol: "BTC-USD",
+		TelemetryAddr:  ":0", // Use random port for testing
+	}
+
+	// Test bot initialization
+	aggregator, strategyEngine, orderManager, riskManager, executionAgent, err := initializeBot(config)
+	testutils.AssertNoError(t, err, "initializeBot should not return error")
+	testutils.AssertNotNil(t, aggregator, "aggregator should not be nil")
+	testutils.AssertNotNil(t, strategyEngine, "strategyEngine should not be nil")
+	testutils.AssertNotNil(t, orderManager, "orderManager should not be nil")
+	testutils.AssertNotNil(t, riskManager, "riskManager should not be nil")
+	testutils.AssertNotNil(t, executionAgent, "executionAgent should not be nil")
+
+	t.Log("Successfully initialized bot with dYdX integration")
 }

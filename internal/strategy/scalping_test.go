@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/guyghost/constantine/internal/exchanges"
+	"github.com/guyghost/constantine/internal/exchanges/dydx"
 	"github.com/shopspring/decimal"
 )
 
@@ -374,4 +375,61 @@ func TestSafeInvoke(t *testing.T) {
 		panic("test panic")
 	})
 	// If we reach here, the panic was caught successfully
+}
+
+func TestScalpingStrategy_WithDYDXExchange(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping dYdX integration test in short mode")
+	}
+
+	// Create dYdX client for testnet
+	client, err := dydx.NewClientWithMnemonicAndURL(
+		"test test test test test test test test test test test junk", // Test mnemonic
+		0,
+		"https://indexer.v4testnet.dydx.exchange",
+		"wss://indexer.v4testnet.dydx.exchange/v4/ws",
+	)
+	if err != nil {
+		t.Skipf("Failed to create dYdX client: %v", err)
+	}
+
+	config := DefaultConfig()
+	config.Symbol = "BTC-USD"
+
+	strategy := NewScalpingStrategy(config, client)
+
+	if strategy == nil {
+		t.Fatal("NewScalpingStrategy should not return nil")
+	}
+
+	// Test that strategy can get ticker data
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	ticker, err := client.GetTicker(ctx, "BTC-USD")
+	if err != nil {
+		t.Skipf("Failed to get ticker from dYdX: %v", err)
+	}
+
+	if ticker.Symbol != "BTC-USD" {
+		t.Errorf("Expected ticker symbol BTC-USD, got %s", ticker.Symbol)
+	}
+
+	// Test that strategy can get candles
+	candles, err := client.GetCandles(ctx, "BTC-USD", "1MIN", 10)
+	if err != nil {
+		t.Skipf("Failed to get candles from dYdX: %v", err)
+	}
+
+	if len(candles) == 0 {
+		t.Error("Should have received candles from dYdX")
+	}
+
+	// Test basic strategy functionality
+	strategy.SetSignalCallback(func(signal *Signal) {
+		t.Logf("Received signal: %s %s at %s", signal.Type, signal.Side, signal.Symbol)
+	})
+
+	t.Logf("Successfully integrated with dYdX: ticker=%.2f, candles=%d",
+		ticker.Last.InexactFloat64(), len(candles))
 }

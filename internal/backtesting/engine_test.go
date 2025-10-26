@@ -1,10 +1,12 @@
 package backtesting
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/guyghost/constantine/internal/exchanges"
+	"github.com/guyghost/constantine/internal/exchanges/dydx"
 	"github.com/guyghost/constantine/internal/strategy"
 	"github.com/guyghost/constantine/internal/testutils"
 	"github.com/shopspring/decimal"
@@ -306,4 +308,94 @@ func TestEngine_Integration_FullBacktest(t *testing.T) {
 		"Final equity should not be negative")
 	testutils.AssertTrue(t, metrics.EquityCurve[len(metrics.EquityCurve)-1].Equity.LessThan(decimal.NewFromFloat(1000000)),
 		"Final equity should be reasonable")
+}
+
+func TestEngine_WithDYDXData(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping dYdX integration test in short mode")
+	}
+
+	// Create dYdX client for testnet
+	client, err := dydx.NewClientWithMnemonicAndURL(
+		"test test test test test test test test test test test junk", // Test mnemonic
+		0,
+		"https://indexer.v4testnet.dydx.exchange",
+		"wss://indexer.v4testnet.dydx.exchange/v4/ws",
+	)
+	if err != nil {
+		t.Skipf("Failed to create dYdX client: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Get recent candles from dYdX
+	candles, err := client.GetCandles(ctx, "BTC-USD", "1MIN", 100)
+	if err != nil {
+		t.Skipf("Failed to get candles from dYdX: %v", err)
+	}
+
+	if len(candles) < 50 {
+		t.Skip("Not enough candle data from dYdX")
+	}
+
+	// Convert to historical data format
+	historicalData := &HistoricalData{
+		Symbol:  "BTC-USD",
+		Candles: candles,
+	}
+
+	// Create backtest config
+	config := &BacktestConfig{
+		InitialCapital: decimal.NewFromFloat(10000),
+		CommissionRate: decimal.NewFromFloat(0.001),  // 0.1%
+		Slippage:       decimal.NewFromFloat(0.0005), // 0.05%
+		RiskPerTrade:   decimal.NewFromFloat(0.01),   // 1%
+		MaxPositions:   1,
+		AllowShort:     false,
+		StartTime:      candles[0].Timestamp,
+		EndTime:        candles[len(candles)-1].Timestamp,
+	}
+
+	// Create strategy config
+	stratConfig := &strategy.Config{
+		Symbol:            "BTC-USD",
+		ShortEMAPeriod:    9,
+		LongEMAPeriod:     21,
+		RSIPeriod:         14,
+		RSIOversold:       30.0,
+		RSIOverbought:     70.0,
+		TakeProfitPercent: 0.5,
+		StopLossPercent:   0.25,
+		MaxPositionSize:   decimal.NewFromFloat(0.1),
+		MinPriceMove:      decimal.NewFromFloat(0.01),
+		UpdateInterval:    1 * time.Second,
+	}
+
+	// Create engine
+	engine := NewEngine(config, historicalData)
+
+	// Run backtest
+	metrics, err := engine.Run(stratConfig)
+	if err != nil {
+		t.Fatalf("Backtest failed: %v", err)
+	}
+
+	// Verify results
+	if metrics.TotalTrades < 0 {
+		t.Error("Total trades should not be negative")
+	}
+
+	if metrics.TotalReturn.LessThan(decimal.NewFromFloat(-1)) {
+		t.Error("Total return should not be worse than -100%")
+	}
+
+	if metrics.MaxDrawdown.GreaterThan(decimal.NewFromFloat(1)) {
+		t.Error("Max drawdown should not exceed 100%")
+	}
+
+	t.Logf("Backtest completed: %d trades, %.2f%% return, %.2f%% max drawdown",
+		metrics.TotalTrades,
+		metrics.TotalReturnPct.InexactFloat64(),
+		metrics.MaxDrawdownPct.InexactFloat64())
 }
