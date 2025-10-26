@@ -6,36 +6,80 @@ on:
   pull_request:
     branches: [main]
 
+# Permissions minimales par défaut
+permissions:
+  contents: read
+
+# Annuler les exécutions précédentes pour la même branche
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build:
+  # Job 1: Validation du code (format, vet, mod)
+  validate:
+    name: Code Validation
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        go-version: ['1.23', '1.24']
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go ${{ matrix.go-version }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache: true
+
+      - name: Verify go.mod and go.sum
+        run: |
+          go mod download
+          go mod verify
+
+      - name: Check gofmt
+        run: |
+          fmt_files=$(gofmt -l .)
+          if [ -n "$fmt_files" ]; then
+            echo "❌ Les fichiers suivants ne sont pas formatés avec gofmt:"
+            echo "$fmt_files"
+            exit 1
+          fi
+          echo "✅ Tous les fichiers sont correctement formatés"
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Check for tidyness
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+  # Job 2: Tests avec coverage
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        go-version: ['1.23', '1.24']
     env:
       OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Go
+      - name: Set up Go ${{ matrix.go-version }}
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: ${{ matrix.go-version }}
           cache: true
 
-      - name: Verify gofmt
-        run: |
-          set -euo pipefail
-          fmt_files=$(git ls-files '*.go')
-          if [ -z "$fmt_files" ]; then
-            exit 0
-          fi
-          unformatted=$(gofmt -l $fmt_files)
-          if [ -n "$unformatted" ]; then
-            echo "The following files are not gofmt'ed:"
-            echo "$unformatted"
-            exit 1
-          fi
-
-      - name: Download modules
+      - name: Download dependencies
         run: go mod download
 
       - name: Load 1Password CLI
@@ -46,22 +90,97 @@ jobs:
 
       - name: Run tests
         run: |
-          if [ -n "${OP_SERVICE_ACCOUNT_TOKEN}" ]; then
-            op run --env-file .env.op.template -- go test ./... -coverprofile=coverage.out
+          if [ -n "${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}" ]; then
+            op run --env-file .env.op.template -- go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
           else
-            go test ./... -coverprofile=coverage.out
+            go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
           fi
 
       - name: Upload coverage to Codecov
+        if: matrix.go-version == '1.24'
         uses: codecov/codecov-action@v4
         with:
           file: ./coverage.out
           flags: unittests
-          name: codecov-umbrella
+          name: codecov-go-${{ matrix.go-version }}
           fail_ci_if_error: false
+
+  # Job 3: Linting
+  lint:
+    name: Linting
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
           version: v1.61.0
-          args: --config=.golangci.yml
+          args: --config=.golangci.yml --timeout=5m
+
+  # Job 4: Build
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        go-version: ['1.23', '1.24']
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+        exclude:
+          # Exclure windows/arm64 car rarement utilisé
+          - goos: windows
+            goarch: arm64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go ${{ matrix.go-version }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          go build -v -o bin/constantine-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/bot
+          go build -v -o bin/backtest-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/backtest
+
+  # Job 5: Sécurité - Vulnérabilités
+  security:
+    name: Security Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck
+        run: govulncheck ./...

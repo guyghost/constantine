@@ -1,22 +1,72 @@
 run:
   timeout: 5m
   issues-exit-code: 1
+  go: '1.24'
 
 linters:
   enable:
-    - govet
-    - staticcheck
-    - gosimple
-    - errcheck
-    - ineffassign
-    - typecheck
-    - gofmt
-    - revive
+    # Analyseurs de base
+    - govet          # Détecte les constructions suspectes
+    - staticcheck    # Analyseur statique avancé
+    - gosimple       # Simplifie le code
+    - errcheck       # Vérifie les erreurs non gérées
+    - ineffassign    # Détecte les assignations inefficaces
+    - typecheck      # Vérifie les types
+    - gofmt          # Vérifie le formatage
+    - revive         # Remplaçant rapide de golint
+    
+    # Linters de sécurité
+    - gosec          # Inspecteur de sécurité
+    
+    # Linters de qualité de code
+    - gocyclo        # Complexité cyclomatique
+    - goconst        # Constantes répétées
+    - misspell       # Fautes d'orthographe
+    - unconvert      # Conversions inutiles
+    - unparam        # Paramètres inutilisés
+    - unused         # Code inutilisé
+    - goimports      # Gestion des imports
+    
+    # Linters de performance
+    - prealloc       # Pré-allocation de slices
+    
+    # Linters de style
+    - godot          # Vérification des commentaires
+    - gci            # Ordonnancement des imports
+
+linters-settings:
+  gocyclo:
+    min-complexity: 15
+  
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+  
+  misspell:
+    locale: US
+  
+  revive:
+    rules:
+      - name: exported
+        disabled: false
+      - name: var-naming
+        disabled: false
+      - name: package-comments
+        disabled: true  # Désactivé car peut être trop strict
 
 issues:
   max-same-issues: 50
   exclude-use-default: false
+  exclude-rules:
+    # Exclure certaines erreurs pour les fichiers de test
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gosec
+        - unparam
 
 output:
   formats:
     - format: github-actions
+  print-issued-lines: true
+  print-linter-name: true
