@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/guyghost/constantine/internal/exchanges"
-	"github.com/guyghost/constantine/internal/logger"
 	"github.com/shopspring/decimal"
 )
 
@@ -49,10 +48,6 @@ func (sg *SignalGenerator) GenerateSignal(
 	volumes []decimal.Decimal,
 	orderbook *exchanges.OrderBook,
 ) *Signal {
-	logger.Component("strategy").Debug("analyzing prices for signal generation",
-		"symbol", symbol,
-		"prices_count", len(prices))
-
 	// Validate inputs
 	if err := sg.validateInputs(symbol, prices, volumes); err != nil {
 		return &Signal{Type: SignalTypeNone, Reason: "Input validation failed: " + err.Error()}
@@ -76,13 +71,6 @@ func (sg *SignalGenerator) GenerateSignal(
 	currentRSI := rsi[len(rsi)-1]
 	currentPrice := prices[len(prices)-1]
 
-	logger.Component("strategy").Debug("calculated indicators",
-		"symbol", symbol,
-		"price", currentPrice.InexactFloat64(),
-		"short_ema", currentShortEMA.InexactFloat64(),
-		"long_ema", currentLongEMA.InexactFloat64(),
-		"rsi", currentRSI.InexactFloat64())
-
 	// Validate calculated values
 	if err := sg.validateCalculatedValues(currentPrice, currentShortEMA, currentLongEMA, currentRSI); err != nil {
 		return &Signal{Type: SignalTypeNone, Reason: "Calculated values validation failed: " + err.Error()}
@@ -91,9 +79,6 @@ func (sg *SignalGenerator) GenerateSignal(
 	// Check for buy signal
 	if sg.isBuySignal(currentShortEMA, currentLongEMA, currentRSI, orderbook) {
 		strength := sg.calculateSignalStrength(currentShortEMA, currentLongEMA, currentRSI, true)
-		logger.Component("strategy").Debug("generated BUY signal",
-			"symbol", symbol,
-			"strength", strength)
 		return &Signal{
 			Type:     SignalTypeEntry,
 			Side:     exchanges.OrderSideBuy,
@@ -107,9 +92,6 @@ func (sg *SignalGenerator) GenerateSignal(
 	// Check for sell signal
 	if sg.isSellSignal(currentShortEMA, currentLongEMA, currentRSI, orderbook) {
 		strength := sg.calculateSignalStrength(currentShortEMA, currentLongEMA, currentRSI, false)
-		logger.Component("strategy").Debug("generated SELL signal",
-			"symbol", symbol,
-			"strength", strength)
 		return &Signal{
 			Type:     SignalTypeEntry,
 			Side:     exchanges.OrderSideSell,
@@ -120,7 +102,6 @@ func (sg *SignalGenerator) GenerateSignal(
 		}
 	}
 
-	logger.Component("strategy").Debug("no signal generated", "symbol", symbol)
 	return &Signal{Type: SignalTypeNone, Reason: "No signal conditions met"}
 }
 

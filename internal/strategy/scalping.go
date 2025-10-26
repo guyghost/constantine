@@ -269,6 +269,13 @@ func (s *ScalpingStrategy) IsRunning() bool {
 	return s.running
 }
 
+// GetConfig returns the strategy configuration
+// This method provides access to the strategy's configuration parameters
+// for use by other components like the backtesting engine
+func (s *ScalpingStrategy) GetConfig() *Config {
+	return s.config
+}
+
 // GetSignalGenerator returns the signal generator for backtesting
 func (s *ScalpingStrategy) GetSignalGenerator() *SignalGenerator {
 	return s.signalGenerator

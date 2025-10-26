@@ -2,6 +2,7 @@ package backtesting
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -398,4 +399,115 @@ func TestEngine_WithDYDXData(t *testing.T) {
 		metrics.TotalTrades,
 		metrics.TotalReturnPct.InexactFloat64(),
 		metrics.MaxDrawdownPct.InexactFloat64())
+}
+
+func TestEngine_WithArtificialSignalData(t *testing.T) {
+	// Enable debug logging for this test
+	os.Setenv("LOG_LEVEL", "debug")
+	defer os.Unsetenv("LOG_LEVEL")
+
+	// Create artificial data designed to trigger trading signals
+	// This test generates data that creates EMA crossovers and RSI extremes
+
+	baseTime := time.Now().Add(-24 * time.Hour)
+	candles := make([]exchanges.Candle, 100)
+
+	// Start with stable price around 50000
+	basePrice := 50000.0
+
+	for i := 0; i < 100; i++ {
+		timestamp := baseTime.Add(time.Duration(i) * time.Minute)
+
+		var price float64
+		if i < 30 {
+			// First 30 candles: gradual decline to create oversold RSI
+			price = basePrice - float64(i)*50
+		} else if i < 60 {
+			// Next 30 candles: sharp rise to create EMA crossover and RSI overbought
+			price = basePrice - 1450 + float64(i-30)*100
+		} else if i < 80 {
+			// Next 20 candles: decline to create oversold condition again
+			price = basePrice + 1450 - float64(i-60)*80
+		} else {
+			// Last 20 candles: rise to create another crossover
+			price = basePrice - 450 + float64(i-80)*60
+		}
+
+		// Add some noise
+		noise := (float64(i%10) - 5) * 10
+		price += noise
+
+		// Ensure price doesn't go negative
+		if price < 100 {
+			price = 100
+		}
+
+		// Create OHLC with small spread
+		open := decimal.NewFromFloat(price - 5)
+		high := decimal.NewFromFloat(price + 10)
+		low := decimal.NewFromFloat(price - 10)
+		close := decimal.NewFromFloat(price)
+		volume := decimal.NewFromFloat(100 + float64(i%20)*10)
+
+		candles[i] = exchanges.Candle{
+			Timestamp: timestamp,
+			Open:      open,
+			High:      high,
+			Low:       low,
+			Close:     close,
+			Volume:    volume,
+		}
+	}
+
+	data := &HistoricalData{
+		Symbol:  "BTC-USD",
+		Candles: candles,
+	}
+
+	// Create backtest config
+	config := DefaultBacktestConfig()
+	config.InitialCapital = decimal.NewFromFloat(10000)
+	config.AllowShort = true // Allow short selling for sell signals
+	config.UseFixedAmount = true
+	config.FixedAmount = decimal.NewFromFloat(0.01) // Small fixed amount
+
+	// Create strategy config
+	strategyConfig := strategy.DefaultConfig()
+	strategyConfig.Symbol = "BTC-USD"
+
+	// Create engine
+	engine := NewEngine(config, data)
+
+	// Run backtest
+	metrics, err := engine.Run(strategyConfig)
+	testutils.AssertNoError(t, err, "Backtest should run without error")
+	testutils.AssertNotNil(t, metrics, "Metrics should be generated")
+
+	t.Logf("Artificial data backtest: %d trades, %.2f%% return",
+		metrics.TotalTrades,
+		metrics.TotalReturnPct.InexactFloat64())
+
+	// With artificial data designed to trigger signals, we should have some trades
+	if metrics.TotalTrades == 0 {
+		t.Log("No trades generated - checking signal generation...")
+
+		// Debug: check what signals are generated
+		signalGen := strategy.NewSignalGenerator(strategyConfig)
+		for i := 30; i < len(candles); i++ {
+			prices := make([]decimal.Decimal, 0, 30)
+			volumes := make([]decimal.Decimal, 0, 30)
+			for j := i - 30; j < i && j >= 0; j++ {
+				prices = append(prices, candles[j].Close)
+				volumes = append(volumes, candles[j].Volume)
+			}
+
+			if len(prices) >= 25 { // Need enough data for indicators
+				signal := signalGen.GenerateSignal("BTC-USD", prices, volumes, nil)
+				if signal.Type != strategy.SignalTypeNone {
+					t.Logf("Signal at candle %d: %s %s (strength: %.2f)",
+						i, signal.Type, signal.Side, signal.Strength)
+				}
+			}
+		}
+	}
 }

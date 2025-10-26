@@ -26,8 +26,8 @@ var (
 	rsiPeriod     = flag.Int("rsi-period", 14, "RSI period")
 	rsiOversold   = flag.Float64("rsi-oversold", 30.0, "RSI oversold threshold")
 	rsiOverbought = flag.Float64("rsi-overbought", 70.0, "RSI overbought threshold")
-	takeProfit    = flag.Float64("take-profit", 0.5, "Take profit percentage")
-	stopLoss      = flag.Float64("stop-loss", 0.25, "Stop loss percentage")
+	takeProfit    = flag.Float64("take-profit", 2.0, "Take profit percentage")
+	stopLoss      = flag.Float64("stop-loss", 1.0, "Stop loss percentage")
 
 	// Output options
 	verbose        = flag.Bool("verbose", false, "Show detailed trade log")
@@ -89,25 +89,23 @@ func run() error {
 		Slippage:       decimal.NewFromFloat(*slippage),
 		RiskPerTrade:   decimal.NewFromFloat(*riskPerTrade),
 		MaxPositions:   *maxPositions,
-		AllowShort:     false,
+		AllowShort:     true,                       // Enable short selling for testing
+		UseFixedAmount: true,                       // Use fixed amount instead of risk-based
+		FixedAmount:    decimal.NewFromFloat(0.01), // Small fixed amount
 		StartTime:      startTime,
 		EndTime:        endTime,
 	}
 
 	// Create strategy config
-	stratConfig := &strategy.Config{
-		Symbol:            *symbol,
-		ShortEMAPeriod:    *shortEMA,
-		LongEMAPeriod:     *longEMA,
-		RSIPeriod:         *rsiPeriod,
-		RSIOversold:       *rsiOversold,
-		RSIOverbought:     *rsiOverbought,
-		TakeProfitPercent: *takeProfit,
-		StopLossPercent:   *stopLoss,
-		MaxPositionSize:   decimal.NewFromFloat(0.1),
-		MinPriceMove:      decimal.NewFromFloat(0.01),
-		UpdateInterval:    1 * time.Second,
-	}
+	stratConfig := strategy.DefaultConfig()
+	stratConfig.Symbol = *symbol
+	stratConfig.ShortEMAPeriod = *shortEMA
+	stratConfig.LongEMAPeriod = *longEMA
+	stratConfig.RSIPeriod = *rsiPeriod
+	stratConfig.RSIOversold = *rsiOversold
+	stratConfig.RSIOverbought = *rsiOverbought
+	stratConfig.TakeProfitPercent = *takeProfit
+	stratConfig.StopLossPercent = *stopLoss
 
 	log.Println("\n⚙️  Backtest Configuration:")
 	log.Printf("   Initial Capital:  $%.2f\n", *initialCapital)

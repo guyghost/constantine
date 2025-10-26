@@ -117,6 +117,12 @@ func (e *Engine) feedCandleToStrategy(ctx context.Context, candle exchanges.Cand
 	// In a real implementation, we'd need to adapt the strategy to accept candles directly
 	// For now, we'll simulate by calling the signal generator
 
+	// Need enough historical data for indicators
+	minDataPoints := 25 // Need at least LongEMAPeriod + some buffer
+	if e.currentIndex < minDataPoints {
+		return // Not enough data yet
+	}
+
 	// Get current candles window for analysis
 	windowSize := 50 // Should be at least max(LongEMAPeriod, RSIPeriod, BB Period)
 	start := e.currentIndex - windowSize + 1
@@ -148,7 +154,7 @@ func (e *Engine) handleSignal(signal *strategy.Signal) {
 
 	// Entry signals
 	if signal.Type == strategy.SignalTypeEntry {
-		if e.position == nil && signal.Strength > 0.5 {
+		if e.position == nil && signal.Strength > 0.1 {
 			e.openPosition(signal, candle)
 		}
 	}
@@ -172,9 +178,10 @@ func (e *Engine) openPosition(signal *strategy.Signal, candle exchanges.Candle) 
 		return // Short selling not allowed
 	}
 
-	// Calculate stop loss and take profit
-	stopLossPercent := decimal.NewFromFloat(0.0025)  // Default 0.25%
-	takeProfitPercent := decimal.NewFromFloat(0.005) // Default 0.5%
+	// Calculate stop loss and take profit based on strategy configuration
+	// These values are now pulled from the strategy config instead of being hardcoded
+	stopLossPercent := decimal.NewFromFloat(e.strategy.GetConfig().StopLossPercent)
+	takeProfitPercent := decimal.NewFromFloat(e.strategy.GetConfig().TakeProfitPercent)
 
 	var stopLoss, takeProfit decimal.Decimal
 	if signal.Side == exchanges.OrderSideBuy {

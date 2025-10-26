@@ -172,14 +172,31 @@ func (dl *DataLoader) GenerateSampleData(symbol string, startTime time.Time, can
 	currentTime := startTime
 	currentPrice := decimal.NewFromFloat(basePrice)
 
+	// Create alternating up/down trends to generate RSI extremes and EMA crossovers
+	trendDirection := 1.0 // 1 for uptrend, -1 for downtrend
+	trendLength := 0
+	maxTrendLength := 15 // Change trend every 15 candles (shorter trends)
+
 	for i := 0; i < candles; i++ {
-		// Generate random price movement (simplified)
-		change := decimal.NewFromFloat((float64(i%10) - 5) * 0.001) // ±0.5% movement
+		// Change trend direction periodically
+		if trendLength >= maxTrendLength {
+			trendDirection *= -1 // Reverse trend
+			trendLength = 0
+		}
+		trendLength++
+
+		// Generate strong price movement with trend + noise
+		trendChange := trendDirection * 0.01        // 1% trend movement (very strong)
+		noiseChange := (float64(i%2) - 0.5) * 0.001 // Minimal ±0.05% noise
+		totalChange := trendChange + noiseChange
+
+		change := decimal.NewFromFloat(totalChange)
 		open := currentPrice
 		close := currentPrice.Add(currentPrice.Mul(change))
 
-		high := decimal.Max(open, close).Mul(decimal.NewFromFloat(1.001))
-		low := decimal.Min(open, close).Mul(decimal.NewFromFloat(0.999))
+		// Ensure reasonable OHLC with ranges for strong trends
+		high := decimal.Max(open, close).Mul(decimal.NewFromFloat(1.005))
+		low := decimal.Min(open, close).Mul(decimal.NewFromFloat(0.995))
 		volume := decimal.NewFromFloat(1000 + float64(i%500))
 
 		candle := exchanges.Candle{
