@@ -125,7 +125,7 @@ func run() error {
 	}()
 
 	// Initialize components
-	multiplexer, strategyOrchestrator, orderManager, riskManager, executionAgent, err := initializeBot(appConfig)
+	multiplexer, strategyOrchestrator, orderManager, riskManager, executionAgent, integratedEngine, err := initializeBot(appConfig)
 	if err != nil {
 		return fmt.Errorf("failed to initialize bot: %w", err)
 	}
@@ -139,11 +139,31 @@ func run() error {
 	// Setup callbacks
 	setupCallbacks(strategyOrchestrator, orderManager, riskManager, executionAgent)
 
+	// Setup integrated strategy engine callbacks
+	integratedEngine.SetSignalCallback(func(signal *strategy.Signal) {
+		botLogger().Info("integrated strategy signal",
+			"type", signal.Type,
+			"side", signal.Side,
+			"symbol", signal.Symbol,
+			"price", signal.Price.StringFixed(2),
+			"strength", signal.Strength,
+		)
+
+		// Handle signal with execution agent
+		if err := executionAgent.HandleSignal(ctx, signal); err != nil {
+			botLogger().Error("execution error", "error", err)
+		}
+	})
+
+	integratedEngine.SetErrorCallback(func(err error) {
+		botLogger().Error("integrated strategy error", "error", err)
+	})
+
 	// Start bot components in background
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := startBotComponents(ctx, strategyOrchestrator, orderManager); err != nil {
+		if err := startBotComponents(ctx, strategyOrchestrator, orderManager, integratedEngine); err != nil {
 			botLogger().Error("failed to start bot components", "error", err)
 		}
 	}()
@@ -182,6 +202,7 @@ func initializeBot(appConfig *config.AppConfig) (
 	*order.Manager,
 	*risk.Manager,
 	*execution.ExecutionAgent,
+	*strategy.IntegratedStrategyEngine,
 	error,
 ) {
 	// Create all exchange clients based on configuration
@@ -230,7 +251,7 @@ func initializeBot(appConfig *config.AppConfig) (
 				dydxCfg.SubAccountNumber,
 			)
 			if err != nil {
-				return nil, nil, nil, nil, nil, fmt.Errorf("failed to create dYdX client with mnemonic: %w", err)
+				return nil, nil, nil, nil, nil, nil, fmt.Errorf("failed to create dYdX client with mnemonic: %w", err)
 			}
 			botLogger().Info("exchange enabled", "exchange", "dydx", "auth", "mnemonic")
 		} else if dydxCfg.APISecret != "" {
@@ -240,19 +261,19 @@ func initializeBot(appConfig *config.AppConfig) (
 				dydxCfg.APISecret,
 			)
 			if err != nil {
-				return nil, nil, nil, nil, nil, fmt.Errorf("failed to create dYdX client: %w", err)
+				return nil, nil, nil, nil, nil, nil, fmt.Errorf("failed to create dYdX client: %w", err)
 			}
 			dydxExchange = client
 			botLogger().Info("exchange enabled", "exchange", "dydx", "auth", "api_key")
 		} else {
-			return nil, nil, nil, nil, nil, fmt.Errorf("dYdX enabled but no authentication method provided - set DYDX_MNEMONIC or DYDX_API_KEY/DYDX_API_SECRET")
+			return nil, nil, nil, nil, nil, nil, fmt.Errorf("dYdX enabled but no authentication method provided - set DYDX_MNEMONIC or DYDX_API_KEY/DYDX_API_SECRET")
 		}
 
 		exchangesMap["dydx"] = dydxExchange
 	}
 
 	if len(exchangesMap) == 0 {
-		return nil, nil, nil, nil, nil, fmt.Errorf("no exchanges enabled - check ENABLE_* environment variables")
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("no exchanges enabled - check ENABLE_* environment variables")
 	}
 
 	// Create aggregator
@@ -273,7 +294,7 @@ func initializeBot(appConfig *config.AppConfig) (
 	// Map all trading symbols to the primary exchange
 	for _, symbol := range appConfig.TradingSymbols {
 		if err := multiplexer.MapSymbol(symbol, primaryExchangeName); err != nil {
-			return nil, nil, nil, nil, nil, fmt.Errorf("failed to map symbol %s: %w", symbol, err)
+			return nil, nil, nil, nil, nil, nil, fmt.Errorf("failed to map symbol %s: %w", symbol, err)
 		}
 		botLogger().Info("symbol mapped", "symbol", symbol, "exchange", primaryExchangeName)
 	}
@@ -299,7 +320,7 @@ func initializeBot(appConfig *config.AppConfig) (
 			Enabled:        true,
 		}
 		if err := symbolManager.AddSymbol(symbol, symbolConfig); err != nil {
-			return nil, nil, nil, nil, nil, fmt.Errorf("failed to add symbol %s: %w", symbol, err)
+			return nil, nil, nil, nil, nil, nil, fmt.Errorf("failed to add symbol %s: %w", symbol, err)
 		}
 		botLogger().Info("symbol configured", "symbol", symbol)
 	}
@@ -319,7 +340,7 @@ func initializeBot(appConfig *config.AppConfig) (
 	// Start strategies for all active symbols
 	for _, symbol := range appConfig.TradingSymbols {
 		if err := strategyOrchestrator.StartSymbol(context.Background(), symbol); err != nil {
-			return nil, nil, nil, nil, nil, fmt.Errorf("failed to start strategy for %s: %w", symbol, err)
+			return nil, nil, nil, nil, nil, nil, fmt.Errorf("failed to start strategy for %s: %w", symbol, err)
 		}
 		botLogger().Info("strategy started", "symbol", symbol)
 	}
@@ -335,7 +356,17 @@ func initializeBot(appConfig *config.AppConfig) (
 	executionConfig := execution.DefaultConfig()
 	executionAgent := execution.NewExecutionAgent(orderManager, riskManager, executionConfig)
 
-	return multiplexer, strategyOrchestrator, orderManager, riskManager, executionAgent, nil
+	// Create integrated strategy engine with dynamic weights and symbol selection
+	// Use primary exchange for market data queries
+	symbolRefreshInterval := 30 * time.Second // Refresh symbol selection every 30 seconds
+	integratedEngine := strategy.NewIntegratedStrategyEngine(
+		baseStrategyConfig,
+		appConfig.TradingSymbols,
+		primaryExchange,
+		symbolRefreshInterval,
+	)
+
+	return multiplexer, strategyOrchestrator, orderManager, riskManager, executionAgent, integratedEngine, nil
 }
 
 // setupCallbacks sets up callbacks between components
@@ -395,11 +426,18 @@ func startBotComponents(
 	ctx context.Context,
 	strategyOrchestrator *strategy.StrategyOrchestrator,
 	orderManager *order.Manager,
+	integratedEngine *strategy.IntegratedStrategyEngine,
 ) error {
 	// Start order manager
 	if err := orderManager.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start order manager: %w", err)
 	}
+
+	// Start integrated strategy engine (with dynamic weights and symbol selection)
+	if err := integratedEngine.Start(ctx); err != nil {
+		return fmt.Errorf("failed to start integrated strategy engine: %w", err)
+	}
+	botLogger().Info("integrated strategy engine started", "refresh_interval", "30s")
 
 	// Start all strategies in the orchestrator
 	activeStrategies := strategyOrchestrator.GetActiveStrategies()
@@ -413,6 +451,11 @@ func startBotComponents(
 
 	// Wait for context cancellation
 	<-ctx.Done()
+
+	// Stop integrated strategy engine
+	if err := integratedEngine.Stop(); err != nil {
+		botLogger().Error("failed to stop integrated strategy engine", "error", err)
+	}
 
 	// Stop all strategies
 	for symbol, strategyInstance := range activeStrategies {

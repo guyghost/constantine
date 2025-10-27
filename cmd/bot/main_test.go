@@ -126,13 +126,14 @@ func TestInitializeBot_WithMockExchange(t *testing.T) {
 	}
 
 	// Test bot initialization
-	aggregator, strategyEngine, orderManager, riskManager, executionAgent, err := initializeBot(config)
+	aggregator, strategyEngine, orderManager, riskManager, executionAgent, integratedEngine, err := initializeBot(config)
 	testutils.AssertNoError(t, err, "initializeBot should not return error")
 	testutils.AssertNotNil(t, aggregator, "aggregator should not be nil")
 	testutils.AssertNotNil(t, strategyEngine, "strategyEngine should not be nil")
 	testutils.AssertNotNil(t, orderManager, "orderManager should not be nil")
 	testutils.AssertNotNil(t, riskManager, "riskManager should not be nil")
 	testutils.AssertNotNil(t, executionAgent, "executionAgent should not be nil")
+	testutils.AssertNotNil(t, integratedEngine, "integratedEngine should not be nil")
 
 	t.Log("Successfully initialized bot with dYdX exchange")
 }
