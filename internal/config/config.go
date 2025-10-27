@@ -61,7 +61,7 @@ func DefaultConfig() *Config {
 		StopLossPercent:       1.0, // Updated to 1%
 		MaxPositionSize:       decimal.NewFromFloat(0.1),
 		MinPriceMove:          decimal.NewFromFloat(0.01),
-		UpdateInterval:        1 * time.Second,
+		UpdateInterval:        5 * time.Second,               // Reduced from 1s to 5s (less CPU usage, aligned with data updates)
 		MaxPriceChangePercent: 5.0,                           // 5% max price change
 		MinPrice:              decimal.NewFromFloat(0.01),    // Minimum valid price
 		MaxPrice:              decimal.NewFromFloat(1000000), // Maximum valid price

@@ -414,14 +414,14 @@ func (s *ScalpingStrategy) handleCandle(candle *exchanges.Candle) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	logger.Component("strategy").Debug("received candle",
+	logger.Component("strategy").Info("📊 candle received",
 		"symbol", candle.Symbol,
-		"timestamp", candle.Timestamp,
-		"open", candle.Open.String(),
-		"high", candle.High.String(),
-		"low", candle.Low.String(),
-		"close", candle.Close.String(),
-		"volume", candle.Volume.String())
+		"timestamp", candle.Timestamp.Format("15:04:05"),
+		"open", candle.Open.StringFixed(2),
+		"high", candle.High.StringFixed(2),
+		"low", candle.Low.StringFixed(2),
+		"close", candle.Close.StringFixed(2),
+		"volume", candle.Volume.StringFixed(4))
 
 	// Use close price for price history (most relevant for indicators)
 	s.prices = append(s.prices, candle.Close)
@@ -440,7 +440,8 @@ func (s *ScalpingStrategy) handleCandle(candle *exchanges.Candle) {
 	logger.Component("strategy").Debug("candle processed",
 		"symbol", s.config.Symbol,
 		"prices_count", len(s.prices),
-		"volumes_count", len(s.volumes))
+		"volumes_count", len(s.volumes),
+		"ready_for_signals", len(s.prices) >= s.config.LongEMAPeriod)
 }
 
 // handleTrade handles trade updates

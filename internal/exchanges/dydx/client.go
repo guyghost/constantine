@@ -373,12 +373,14 @@ func (c *Client) SubscribeTrades(ctx context.Context, symbol string, callback fu
 // SubscribeCandles subscribes to candle updates (using periodic REST API calls)
 func (c *Client) SubscribeCandles(ctx context.Context, symbol string, interval string, callback func(*exchanges.Candle)) error {
 	// dYdX v4 doesn't provide real-time candle streams via WebSocket
-	// We'll simulate by polling the REST API periodically
+	// Improved: Poll more frequently (every 10 seconds) instead of every minute
+	// This provides much more responsive price updates for strategy execution
 
 	resolution := intervalToDYdXResolution(interval)
 
 	go func() {
-		ticker := time.NewTicker(1 * time.Minute) // Poll every minute for 1m candles
+		// Poll every 10 seconds instead of every minute for much better responsiveness
+		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
 
 		var lastTimestamp time.Time
@@ -388,17 +390,21 @@ func (c *Client) SubscribeCandles(ctx context.Context, symbol string, interval s
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				// Get latest candle
-				candles, err := c.GetCandles(ctx, symbol, resolution, 1)
+				// Get latest candles (get 2 to detect when we move to next candle)
+				candles, err := c.GetCandles(ctx, symbol, resolution, 2)
 				if err != nil {
 					continue
 				}
 
 				if len(candles) > 0 {
-					candle := candles[0]
-					// Only emit if this is a new candle
-					if candle.Timestamp.After(lastTimestamp) {
-						lastTimestamp = candle.Timestamp
+					// Always use the most recent candle
+					candle := candles[len(candles)-1]
+					// Only emit if this is a new candle or updated data
+					if candle.Timestamp.After(lastTimestamp) || candle.Timestamp.Equal(lastTimestamp) {
+						// For same timestamp, still emit to get latest OHLC values
+						if candle.Timestamp != lastTimestamp {
+							lastTimestamp = candle.Timestamp
+						}
 						callback(&candle)
 					}
 				}
