@@ -18,6 +18,7 @@ type Model struct {
 	strategyOrchestrator *strategy.StrategyOrchestrator
 	orderManager         *order.Manager
 	riskManager          *risk.Manager
+	integratedEngine     *strategy.IntegratedStrategyEngine
 	running              bool
 
 	// UI state
@@ -27,14 +28,17 @@ type Model struct {
 	lastUpdate time.Time
 
 	// Data
-	tradingSymbols []string // Configured trading symbols
-	currentSignals map[string]interface{}
-	openOrders     []*exchanges.Order
-	positions      []*order.ManagedPosition
-	orderbook      *exchanges.OrderBook
-	riskStats      *risk.Stats
-	orderStats     *order.OrderStats
-	messages       []string
+	tradingSymbols    []string                             // Configured trading symbols
+	selectedSymbols   map[string]strategy.RankedSymbol     // Selected symbols with scores
+	dynamicWeights    map[string]strategy.IndicatorWeights // Current dynamic weights per symbol
+	currentSignals    map[string]interface{}
+	openOrders        []*exchanges.Order
+	positions         []*order.ManagedPosition
+	orderbook         *exchanges.OrderBook
+	riskStats         *risk.Stats
+	orderStats        *order.OrderStats
+	messages          []string
+	lastSymbolRefresh time.Time // Time of last symbol selection update
 
 	// Error handling
 	lastError error
@@ -60,6 +64,7 @@ func NewModel(
 	strategyOrchestrator *strategy.StrategyOrchestrator,
 	orderManager *order.Manager,
 	riskManager *risk.Manager,
+	integratedEngine *strategy.IntegratedStrategyEngine,
 	tradingSymbols []string,
 ) Model {
 	return Model{
@@ -67,11 +72,15 @@ func NewModel(
 		strategyOrchestrator: strategyOrchestrator,
 		orderManager:         orderManager,
 		riskManager:          riskManager,
+		integratedEngine:     integratedEngine,
 		tradingSymbols:       tradingSymbols,
 		activeView:           ViewDashboard,
 		currentSignals:       make(map[string]interface{}),
+		selectedSymbols:      make(map[string]strategy.RankedSymbol),
+		dynamicWeights:       make(map[string]strategy.IndicatorWeights),
 		messages:             make([]string, 0),
 		lastUpdate:           time.Now(),
+		lastSymbolRefresh:    time.Now(),
 	}
 }
 
@@ -230,4 +239,32 @@ func (m *Model) GetError() (error, time.Time) {
 // ClearError clears the last error
 func (m *Model) ClearError() {
 	m.lastError = nil
+}
+
+// UpdateSelectedSymbols updates the currently selected trading symbols
+func (m *Model) UpdateSelectedSymbols(symbols map[string]strategy.RankedSymbol) {
+	m.selectedSymbols = symbols
+	m.lastSymbolRefresh = time.Now()
+	m.AddMessage(fmt.Sprintf("Symbol selection updated: %d symbols selected", len(symbols)))
+}
+
+// UpdateDynamicWeights updates the dynamic weights for a symbol
+func (m *Model) UpdateDynamicWeights(symbol string, weights strategy.IndicatorWeights) {
+	m.dynamicWeights[symbol] = weights
+}
+
+// GetIntegratedEngine returns the integrated strategy engine
+func (m *Model) GetIntegratedEngine() *strategy.IntegratedStrategyEngine {
+	return m.integratedEngine
+}
+
+// GetSelectedSymbols returns the currently selected symbols
+func (m *Model) GetSelectedSymbols() map[string]strategy.RankedSymbol {
+	return m.selectedSymbols
+}
+
+// GetDynamicWeights returns the dynamic weights for a symbol
+func (m *Model) GetDynamicWeights(symbol string) (strategy.IndicatorWeights, bool) {
+	weights, ok := m.dynamicWeights[symbol]
+	return weights, ok
 }

@@ -164,6 +164,12 @@ func (m Model) fetchData() tea.Cmd {
 			m.UpdateOrderStats(stats)
 		}
 
+		// Update selected symbols and weights from integrated engine
+		if m.integratedEngine != nil {
+			selectedSymbols := m.integratedEngine.GetSelectedSymbols()
+			m.UpdateSelectedSymbols(selectedSymbols)
+		}
+
 		return nil
 	}
 }

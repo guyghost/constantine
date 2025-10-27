@@ -109,15 +109,30 @@ func (m Model) renderHeader() string {
 
 	statusText := statusStyle.Render(status)
 
-	exchange := mutedStyle.Render("Multi-Exchange: Hyperliquid, Coinbase, dYdX")
+	// Show selected symbols count
+	selectedCount := len(m.GetSelectedSymbols())
+	configuredCount := len(m.tradingSymbols)
+	symbolsText := mutedStyle.Render(fmt.Sprintf("Symbols: %d/%d", selectedCount, configuredCount))
 
-	return lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		title,
-		"  ",
-		statusText,
-		"  ",
-		exchange,
+	// Show integrated engine status
+	engine := m.GetIntegratedEngine()
+	engineText := mutedStyle.Render("Engine: Initializing")
+	if engine != nil {
+		engineText = successStyle.Render("Engine: Active")
+	}
+
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		lipgloss.JoinHorizontal(
+			lipgloss.Top,
+			title,
+			"  ",
+			statusText,
+			"  ",
+			symbolsText,
+			"  ",
+			engineText,
+		),
 	)
 }
 
@@ -151,8 +166,8 @@ func (m Model) renderDashboard() string {
 	// Summary
 	summary := m.renderSummary()
 
-	// Trading symbols status
-	symbolsBox := m.renderTradingSymbols()
+	// Selected symbols with scores
+	selectedSymbolsBox := m.renderSelectedSymbols()
 
 	// Current signal
 	signalBox := m.renderCurrentSignal()
@@ -160,8 +175,8 @@ func (m Model) renderDashboard() string {
 	// Recent messages
 	messagesBox := m.renderMessages()
 
-	// Arrange in grid - 2x2 layout
-	topRow := lipgloss.JoinHorizontal(lipgloss.Top, summary, "  ", symbolsBox)
+	// Arrange in grid - 2x3 layout
+	topRow := lipgloss.JoinHorizontal(lipgloss.Top, summary, "  ", selectedSymbolsBox)
 	bottomRow := lipgloss.JoinHorizontal(lipgloss.Top, signalBox, "  ", messagesBox)
 
 	return lipgloss.JoinVertical(lipgloss.Left, topRow, "", bottomRow)
@@ -197,6 +212,15 @@ func (m Model) renderSummary() string {
 		}
 	}
 	content.WriteString(fmt.Sprintf("Exchanges:     %d/%d connected\n", connectedCount, totalCount))
+
+	// Selected symbols
+	selectedSymbols := m.GetSelectedSymbols()
+	configuredSymbols := len(m.tradingSymbols)
+	selectionPercent := 0.0
+	if configuredSymbols > 0 {
+		selectionPercent = float64(len(selectedSymbols)) / float64(configuredSymbols) * 100
+	}
+	content.WriteString(fmt.Sprintf("Selected:      %d/%d symbols (%.0f%%)\n", len(selectedSymbols), configuredSymbols, selectionPercent))
 
 	// Positions (from primary exchange for now)
 	posCount := len(m.positions)
@@ -269,7 +293,54 @@ func (m Model) renderMessages() string {
 	return boxStyle.Render(content.String())
 }
 
-// renderTradingSymbols renders the trading symbols status
+// renderSelectedSymbols renders the selected symbols with scores and weights
+func (m Model) renderSelectedSymbols() string {
+	var content strings.Builder
+
+	content.WriteString(headerStyle.Render("Selected Symbols") + "\n\n")
+
+	selectedSymbols := m.GetSelectedSymbols()
+	if len(selectedSymbols) == 0 {
+		content.WriteString(mutedStyle.Render("Updating symbol selection..."))
+	} else {
+		for _, rankedSymbol := range selectedSymbols {
+			// Render symbol with score
+			scorePercent := rankedSymbol.Score * 100
+			scoreStyle := successStyle
+			if scorePercent < 30 {
+				scoreStyle = errorStyle
+			} else if scorePercent < 60 {
+				scoreStyle = mutedStyle
+			}
+
+			content.WriteString(fmt.Sprintf("📊 %s: %s (%.1f%%)\n",
+				rankedSymbol.Symbol,
+				scoreStyle.Render(fmt.Sprintf("%.2f", rankedSymbol.Score)),
+				scorePercent))
+
+			// Show metrics
+			content.WriteString(fmt.Sprintf("  Potential: %s | Sharpe: %s\n",
+				rankedSymbol.Potential.StringFixed(4),
+				rankedSymbol.SharpeRatio.StringFixed(4)))
+
+			// Show dynamic weights for this symbol if available
+			if weights, ok := m.GetDynamicWeights(rankedSymbol.Symbol); ok {
+				content.WriteString(fmt.Sprintf("  Weights - EMA: %.0f%% RSI: %.0f%% Vol: %.0f%% BB: %.0f%%\n",
+					weights.EMA*100, weights.RSI*100, weights.Volume*100, weights.BB*100))
+			}
+
+			content.WriteString("\n")
+		}
+
+		// Show refresh time
+		refreshDelta := time.Since(m.lastSymbolRefresh)
+		content.WriteString(mutedStyle.Render(fmt.Sprintf("Last refresh: %vs ago", int(refreshDelta.Seconds()))))
+	}
+
+	return boxStyle.Render(content.String())
+}
+
+// renderTradingSymbols renders the trading symbols status (all configured symbols)
 func (m Model) renderTradingSymbols() string {
 	var content strings.Builder
 
@@ -482,42 +553,127 @@ func (m Model) renderExchanges() string {
 	return boxStyle.Render(content.String())
 }
 
-// renderSymbols renders the symbols view
+// renderSymbols renders the symbols view with detailed information
 func (m Model) renderSymbols() string {
 	var content strings.Builder
 
-	content.WriteString(headerStyle.Render("Trading Symbols") + "\n\n")
+	content.WriteString(headerStyle.Render("Symbols Analysis") + "\n\n")
 
-	// For now, show active signals as symbols
-	if len(m.currentSignals) == 0 {
-		content.WriteString(mutedStyle.Render("No active symbols"))
+	selectedSymbols := m.GetSelectedSymbols()
+
+	if len(selectedSymbols) == 0 {
+		content.WriteString(mutedStyle.Render("No symbols selected yet"))
 	} else {
-		for symbol, sig := range m.currentSignals {
-			if signal, ok := sig.(*strategy.Signal); ok {
-				sideStyle := successStyle
-				if signal.Side == exchanges.OrderSideSell {
-					sideStyle = errorStyle
-				}
+		content.WriteString(successStyle.Render("SELECTED SYMBOLS FOR TRADING") + "\n\n")
 
-				content.WriteString(fmt.Sprintf("📊 %s\n", symbol))
-				content.WriteString(fmt.Sprintf("  Signal: %s %s\n",
-					signal.Type,
-					sideStyle.Render(string(signal.Side))))
-				content.WriteString(fmt.Sprintf("  Strength: %.1f%%\n", signal.Strength*100))
-				content.WriteString("\n")
+		for _, rankedSymbol := range selectedSymbols {
+			// Header with score
+			scorePercent := rankedSymbol.Score * 100
+			scoreStyle := successStyle
+			if scorePercent < 30 {
+				scoreStyle = errorStyle
+			} else if scorePercent < 60 {
+				scoreStyle = mutedStyle
 			}
+
+			content.WriteString(fmt.Sprintf("📊 %s\n", rankedSymbol.Symbol))
+			content.WriteString(fmt.Sprintf("  Opportunity Score: %s (%.1f%%)\n",
+				scoreStyle.Render(fmt.Sprintf("%.4f", rankedSymbol.Score)),
+				scorePercent))
+
+			// Metrics
+			content.WriteString(fmt.Sprintf("  Gain Potential:    %s\n", rankedSymbol.Potential.StringFixed(6)))
+			content.WriteString(fmt.Sprintf("  Risk Assessment:   %s\n", rankedSymbol.Risk.StringFixed(6)))
+			content.WriteString(fmt.Sprintf("  Sharpe Ratio:      %s\n", rankedSymbol.SharpeRatio.StringFixed(6)))
+
+			// Dynamic weights
+			if weights, ok := m.GetDynamicWeights(rankedSymbol.Symbol); ok {
+				content.WriteString("\n  Dynamic Weights:\n")
+				content.WriteString(fmt.Sprintf("    EMA:            %.1f%%\n", weights.EMA*100))
+				content.WriteString(fmt.Sprintf("    RSI:            %.1f%%\n", weights.RSI*100))
+				content.WriteString(fmt.Sprintf("    Volume:         %.1f%%\n", weights.Volume*100))
+				content.WriteString(fmt.Sprintf("    Bollinger Bands %.1f%%\n", weights.BB*100))
+			}
+
+			// Current signal if available
+			if sig, hasSignal := m.currentSignals[rankedSymbol.Symbol]; hasSignal {
+				if signal, ok := sig.(*strategy.Signal); ok {
+					sideStyle := successStyle
+					if signal.Side == exchanges.OrderSideSell {
+						sideStyle = errorStyle
+					}
+					content.WriteString(fmt.Sprintf("\n  Current Signal: %s %s (%.1f%%)\n",
+						signal.Type,
+						sideStyle.Render(string(signal.Side)),
+						signal.Strength*100))
+				}
+			}
+
+			content.WriteString("\n")
 		}
+
+		// Show refresh time
+		refreshDelta := time.Since(m.lastSymbolRefresh)
+		content.WriteString(mutedStyle.Render(fmt.Sprintf("\nSymbol selection updated: %vs ago", int(refreshDelta.Seconds()))))
 	}
+
+	// Show all configured symbols count
+	content.WriteString(fmt.Sprintf("\n%s (%d configured, %d selected)\n",
+		headerStyle.Render("Summary"),
+		len(m.tradingSymbols),
+		len(selectedSymbols)))
 
 	return boxStyle.Render(content.String())
 }
 
-// renderSettings renders the settings view
+// renderSettings renders the settings view with engine configuration
 func (m Model) renderSettings() string {
 	var content strings.Builder
 
-	content.WriteString(headerStyle.Render("Settings") + "\n\n")
-	content.WriteString(mutedStyle.Render("Settings view - coming soon"))
+	content.WriteString(headerStyle.Render("Strategy Configuration") + "\n\n")
+
+	// Integrated Engine Status
+	engine := m.GetIntegratedEngine()
+	if engine == nil {
+		content.WriteString(errorStyle.Render("⚠ Integrated Strategy Engine not initialized"))
+	} else {
+		content.WriteString(successStyle.Render("✓ Integrated Strategy Engine Active") + "\n\n")
+
+		// Engine Features
+		content.WriteString(headerStyle.Render("Features Enabled:") + "\n")
+		content.WriteString("  ✓ Dynamic Indicator Weights\n")
+		content.WriteString("  ✓ Intelligent Symbol Selection\n")
+		content.WriteString("  ✓ Real-time Signal Generation\n")
+		content.WriteString("  ✓ Automatic Risk Management\n\n")
+
+		// Symbol Selection
+		selectedSymbols := m.GetSelectedSymbols()
+		content.WriteString(headerStyle.Render("Symbol Selection:") + "\n")
+		content.WriteString(fmt.Sprintf("  Configured:  %d symbols\n", len(m.tradingSymbols)))
+		content.WriteString(fmt.Sprintf("  Selected:    %d symbols (%.0f%%)\n",
+			len(selectedSymbols),
+			float64(len(selectedSymbols))/float64(len(m.tradingSymbols))*100))
+		content.WriteString(fmt.Sprintf("  Last Update: %vs ago\n\n", int(time.Since(m.lastSymbolRefresh).Seconds())))
+
+		// Weight Configuration
+		content.WriteString(headerStyle.Render("Indicator Weights:") + "\n")
+		content.WriteString("  Base Allocation:\n")
+		content.WriteString("    EMA:            35%\n")
+		content.WriteString("    RSI:            35%\n")
+		content.WriteString("    Volume:         20%\n")
+		content.WriteString("    Bollinger Band: 10%\n\n")
+		content.WriteString(mutedStyle.Render("  * Weights adjust dynamically based on market volatility, trend, and momentum\n"))
+
+		// Risk Management
+		content.WriteString(headerStyle.Render("Risk Management:") + "\n")
+		content.WriteString("  Stop Loss:      0.40%\n")
+		content.WriteString("  Take Profit:    0.80%\n")
+		content.WriteString("  Min Signal:     0.50 (50%)\n\n")
+
+		// Refresh Interval
+		content.WriteString(headerStyle.Render("Symbol Refresh:") + "\n")
+		content.WriteString("  Interval:       30 seconds\n")
+	}
 
 	return boxStyle.Render(content.String())
 }

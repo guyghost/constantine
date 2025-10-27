@@ -178,7 +178,7 @@ func run() error {
 	}
 
 	// Create TUI model
-	model := tui.NewModel(multiplexer, strategyOrchestrator, orderManager, riskManager, appConfig.TradingSymbols)
+	model := tui.NewModel(multiplexer, strategyOrchestrator, orderManager, riskManager, integratedEngine, appConfig.TradingSymbols)
 
 	// Start the TUI
 	p := tea.NewProgram(model, tea.WithAltScreen())
