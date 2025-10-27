@@ -745,8 +745,55 @@ func (c *Client) PlaceOrder(ctx context.Context, order *exchanges.Order) (*excha
 
 // CancelOrder cancels an existing order
 func (c *Client) CancelOrder(ctx context.Context, orderID string) error {
-	// TODO: Implement REST API call
-	return nil
+	if c.privateKey == nil {
+		return fmt.Errorf("hyperliquid requires a private key to cancel orders")
+	}
+
+	// Parse order ID to int64
+	oid, err := strconv.ParseInt(orderID, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid order ID format")
+	}
+
+	// Create cancel action
+	cancelAction := map[string]interface{}{
+		"type": "cancel",
+		"cancellations": []interface{}{
+			map[string]interface{}{
+				"oid": oid,
+			},
+		},
+	}
+
+	// Get timestamp for nonce
+	timestamp := time.Now().UnixMilli()
+
+	// Sign the action
+	signature, err := signL1Action(c.privateKey, cancelAction, nil, timestamp, nil, c.baseURL == hyperliquidAPIURL)
+	if err != nil {
+		return fmt.Errorf("failed to sign cancel: %w", err)
+	}
+
+	// Create request payload
+	payload := map[string]interface{}{
+		"action":    cancelAction,
+		"nonce":     timestamp,
+		"signature": signature,
+	}
+
+	// Make the request
+	var response map[string]interface{}
+	err = c.httpClient.doRequest(ctx, "POST", "/exchange", payload, &response)
+	if err != nil {
+		return fmt.Errorf("failed to cancel order: %w", err)
+	}
+
+	// Check response
+	if status, ok := response["status"].(string); ok && status == "ok" {
+		return nil
+	}
+
+	return fmt.Errorf("failed to cancel order: invalid response")
 }
 
 // HyperliquidOrderStatusResponse represents the response from order status API
@@ -764,7 +811,30 @@ type HyperliquidOrderStatusResponse struct {
 	} `json:"status"`
 }
 
-// GetOrder retrieves order details
+// HyperliquidOrderHistoryResponse represents the response from order history API
+type HyperliquidOrderHistoryResponse []struct {
+	Coin       string `json:"coin"`
+	LimitPx    string `json:"limitPx"`
+	Oid        int64  `json:"oid"`
+	Side       string `json:"side"`
+	Sz         string `json:"sz"`
+	Timestamp  int64  `json:"timestamp"`
+	FilledSz   string `json:"filledSz,omitempty"`
+	AvgPx      string `json:"avgPx,omitempty"`
+	OrderState string `json:"orderState"`
+}
+
+// HyperliquidOpenOrdersResponse represents the response from open orders API
+type HyperliquidOpenOrdersResponse []struct {
+	Coin      string `json:"coin"`
+	LimitPx   string `json:"limitPx"`
+	Oid       int64  `json:"oid"` // Order ID
+	Side      string `json:"side"`
+	Sz        string `json:"sz"`        // Size
+	Timestamp int64  `json:"timestamp"` // Unix timestamp in ms
+}
+
+// GetOrder retrieves details of a specific order by ID
 func (c *Client) GetOrder(ctx context.Context, orderID string) (*exchanges.Order, error) {
 	if c.apiKey == "" {
 		return nil, fmt.Errorf("hyperliquid requires an ethereum address (set as API key) to query order status")
@@ -843,16 +913,6 @@ func (c *Client) GetOrder(ctx context.Context, orderID string) (*exchanges.Order
 	order.Type = exchanges.OrderTypeLimit
 
 	return order, nil
-}
-
-// HyperliquidOpenOrdersResponse represents the response from open orders API
-type HyperliquidOpenOrdersResponse []struct {
-	Coin      string `json:"coin"`
-	LimitPx   string `json:"limitPx"`
-	Oid       int64  `json:"oid"` // Order ID
-	Side      string `json:"side"`
-	Sz        string `json:"sz"`        // Size
-	Timestamp int64  `json:"timestamp"` // Unix timestamp in ms
 }
 
 // GetOpenOrders retrieves all open orders
@@ -939,8 +999,100 @@ func (c *Client) GetOpenOrders(ctx context.Context, symbol string) ([]exchanges.
 
 // GetOrderHistory retrieves order history
 func (c *Client) GetOrderHistory(ctx context.Context, symbol string, limit int) ([]exchanges.Order, error) {
-	// TODO: Implement REST API call
-	return []exchanges.Order{}, nil
+	if c.apiKey == "" {
+		return []exchanges.Order{}, nil
+	}
+
+	request := map[string]any{
+		"type":  "orderHistory",
+		"user":  c.apiKey,
+		"limit": limit,
+	}
+
+	if symbol != "" {
+		coin := extractCoinFromSymbol(symbol)
+		request["coin"] = coin
+	}
+
+	var response HyperliquidOrderHistoryResponse
+	err := c.httpClient.doRequest(ctx, "POST", "/info", request, &response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get order history: %w", err)
+	}
+
+	orders := make([]exchanges.Order, 0, len(response))
+
+	for _, o := range response {
+		// Filter by symbol if specified
+		orderSymbol := o.Coin + "-USD"
+		if symbol != "" && orderSymbol != symbol {
+			continue
+		}
+
+		// Parse price
+		price, err := decimal.NewFromString(o.LimitPx)
+		if err != nil {
+			continue
+		}
+
+		// Parse size
+		size, err := decimal.NewFromString(o.Sz)
+		if err != nil {
+			continue
+		}
+
+		// Determine side
+		var side exchanges.OrderSide
+		if o.Side == "B" || o.Side == "buy" {
+			side = exchanges.OrderSideBuy
+		} else {
+			side = exchanges.OrderSideSell
+		}
+
+		// Convert timestamp
+		timestamp := time.UnixMilli(o.Timestamp)
+
+		// Map order state to status
+		var status exchanges.OrderStatus
+		switch o.OrderState {
+		case "filled":
+			status = exchanges.OrderStatusFilled
+		case "canceled", "cancelled":
+			status = exchanges.OrderStatusCanceled
+		default:
+			status = exchanges.OrderStatusOpen
+		}
+
+		order := exchanges.Order{
+			ID:        fmt.Sprintf("%d", o.Oid),
+			Symbol:    orderSymbol,
+			Side:      side,
+			Type:      exchanges.OrderTypeLimit,
+			Price:     price,
+			Amount:    size,
+			Status:    status,
+			CreatedAt: timestamp,
+			UpdatedAt: timestamp,
+		}
+
+		// Parse filled amount
+		if o.FilledSz != "" {
+			if filled, err := decimal.NewFromString(o.FilledSz); err == nil {
+				order.FilledAmount = filled
+			}
+		}
+
+		// Parse average price
+		if o.AvgPx != "" {
+			if avg, err := decimal.NewFromString(o.AvgPx); err == nil {
+				order.AveragePrice = avg
+			}
+		}
+
+		orders = append(orders, order)
+	}
+
+	return orders, nil
 }
 
 // HyperliquidBalanceResponse represents the response from Hyperliquid balance API

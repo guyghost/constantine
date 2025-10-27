@@ -69,7 +69,8 @@ func main() {
 	// Display results
 	fmt.Println("═══════════════════════════════════════════════════════════")
 	fmt.Println("                    RESULTS")
-	fmt.Println("═══════════════════════════════════════════════════════════\n")
+	fmt.Println("═══════════════════════════════════════════════════════════")
+	fmt.Println()
 
 	if len(bestMarkets) == 0 {
 		fmt.Println("⚠️  No markets met the selection criteria")
@@ -97,7 +98,9 @@ func main() {
 
 	// Verbose output
 	if *verbose {
-		fmt.Println("\n📊 DETAILED ANALYSIS\n")
+		fmt.Println()
+		fmt.Println("📊 DETAILED ANALYSIS")
+		fmt.Println()
 		fmt.Println("Top 10 Recommended Symbols:")
 		for i, market := range bestMarkets {
 			if i >= 10 {
