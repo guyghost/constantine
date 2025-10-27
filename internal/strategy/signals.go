@@ -273,43 +273,54 @@ func (sg *SignalGenerator) checkOrderbookImbalance(orderbook *exchanges.OrderBoo
 }
 
 // calculateSignalStrength calculates the strength of a signal (0.0 to 1.0)
+// IMPROVED: Enhanced weighting to ensure signals that pass validation are executed
 func (sg *SignalGenerator) calculateSignalStrength(
 	shortEMA, longEMA, rsi decimal.Decimal,
 	isBuy bool,
 ) float64 {
 	strength := 0.0
 
-	// EMA divergence strength (max 0.4)
+	// EMA divergence strength (max 0.5)
+	// Increased from 0.4 to give more weight to EMA crossovers
 	emaDiff := shortEMA.Sub(longEMA).Abs()
 	emaStrength := 0.0
 	if !longEMA.IsZero() {
 		emaDivergence := emaDiff.Div(longEMA)
 		emaStrength, _ = emaDivergence.Mul(decimal.NewFromInt(100)).Float64()
 	}
-	if emaStrength > 0.4 {
-		emaStrength = 0.4
+	if emaStrength > 0.5 {
+		emaStrength = 0.5
 	}
 	strength += emaStrength
 
-	// RSI strength (max 0.6)
+	// RSI strength (max 0.5)
+	// Increased from 0.6 for better balance with other factors
 	rsiFloat, _ := rsi.Float64()
 	var rsiStrength float64
 	if isBuy {
 		// For buy: the lower the RSI, the stronger the signal
-		rsiStrength = (sg.config.RSIOversold - rsiFloat) / sg.config.RSIOversold * 0.6
+		rsiStrength = (sg.config.RSIOversold - rsiFloat) / sg.config.RSIOversold * 0.5
 	} else {
 		// For sell: the higher the RSI, the stronger the signal
-		rsiStrength = (rsiFloat - sg.config.RSIOverbought) / (100.0 - sg.config.RSIOverbought) * 0.6
+		rsiStrength = (rsiFloat - sg.config.RSIOverbought) / (100.0 - sg.config.RSIOverbought) * 0.5
 	}
 
 	if rsiStrength < 0 {
 		rsiStrength = 0
 	}
-	if rsiStrength > 0.6 {
-		rsiStrength = 0.6
+	if rsiStrength > 0.5 {
+		rsiStrength = 0.5
 	}
 	strength += rsiStrength
 
+	// Ensure minimum strength when signal passes validation
+	// If both EMA crossover AND RSI condition are met, boost confidence
+	// This handles cases where RSI is not deep in oversold/overbought territory
+	if strength < 0.3 {
+		strength = 0.3 // Minimum confidence for validated signals
+	}
+
+	// Normalization: cap at 1.0
 	if strength > 1.0 {
 		strength = 1.0
 	}

@@ -79,7 +79,7 @@ func TestDefaultConfig(t *testing.T) {
 
 	assert.Equal(t, decimal.NewFromFloat(0.005), config.StopLossPercent)
 	assert.Equal(t, decimal.NewFromFloat(0.01), config.TakeProfitPercent)
-	assert.Equal(t, 0.5, config.MinSignalStrength)
+	assert.Equal(t, 0.3, config.MinSignalStrength) // Updated: reduced from 0.5 to 0.3 to allow more signals
 	assert.True(t, config.AutoExecute)
 }
 

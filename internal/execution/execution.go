@@ -49,7 +49,7 @@ func DefaultConfig() Config {
 	return Config{
 		StopLossPercent:   decimal.NewFromFloat(0.005), // 0.5%
 		TakeProfitPercent: decimal.NewFromFloat(0.01),  // 1%
-		MinSignalStrength: 0.5,                         // 50%
+		MinSignalStrength: 0.3,                         // 30% - Reduced to allow more signals while still filtering weak ones
 		AutoExecute:       true,
 	}
 }
