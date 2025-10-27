@@ -81,8 +81,7 @@ func main() {
 	fmt.Println("─────────────────────────────────────────────────────────────")
 
 	for i, market := range bestMarkets {
-		volumeFloat, _ := market.Volume24h.Float64()
-		volumeStr := formatVolume(volumeFloat)
+		volumeStr := formatVolume(market.Volume24h)
 
 		fmt.Printf("%-10d %-10s %-10.1f%% %-15s %-12.1f%% %-12.1f%%\n",
 			i+1,
@@ -106,7 +105,10 @@ func main() {
 			}
 			fmt.Printf("\n%d. %s\n", i+1, market.Symbol)
 			fmt.Printf("   Quality Score: %.2f%%\n", market.QualityScore*100)
-			fmt.Printf("   Volume (24h): $%.2fM\n", volumeToMillions(market.Volume24h))
+			volumeStr := market.Volume24h.String()
+			volumeFloat := 0.0
+			fmt.Sscanf(volumeStr, "%f", &volumeFloat)
+			fmt.Printf("   Volume (24h): $%.1fM\n", volumeFloat/1_000_000)
 			fmt.Printf("   Liquidity: %.2f%%\n", market.Liquidity*100)
 			fmt.Printf("   Volatility: %.2f%%\n", market.Volatility*100)
 
@@ -125,7 +127,24 @@ func main() {
 	fmt.Println("\n✨ Recommendation: Start with the top 3-5 symbols for optimal trading")
 }
 
-func formatVolume(volumeUSD float64) string {
+func formatVolume(volume interface{}) string {
+	var volumeUSD float64
+
+	// Handle decimal type
+	switch v := volume.(type) {
+	case string:
+		fmt.Sscanf(v, "%f", &volumeUSD)
+	default:
+		// Assume it's already a float or can be converted
+		if f, ok := v.(float64); ok {
+			volumeUSD = f
+		} else if dec, ok := v.(any); ok {
+			// Try to get string representation and parse
+			str := fmt.Sprintf("%v", dec)
+			fmt.Sscanf(str, "%f", &volumeUSD)
+		}
+	}
+
 	switch {
 	case volumeUSD >= 1_000_000_000:
 		return fmt.Sprintf("$%.1fB", volumeUSD/1_000_000_000)
@@ -139,13 +158,16 @@ func formatVolume(volumeUSD float64) string {
 }
 
 func volumeToMillions(volume interface{}) float64 {
+	var f float64
+
 	// Handle decimal type
 	switch v := volume.(type) {
 	case string:
-		// Try to parse as float
-		var f float64
 		fmt.Sscanf(v, "%f", &f)
-		return f / 1_000_000
+	default:
+		str := fmt.Sprintf("%v", v)
+		fmt.Sscanf(str, "%f", &f)
 	}
-	return 0
+
+	return f / 1_000_000
 }
