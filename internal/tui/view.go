@@ -301,9 +301,27 @@ func (m Model) renderSelectedSymbols() string {
 
 	selectedSymbols := m.GetSelectedSymbols()
 	if len(selectedSymbols) == 0 {
-		content.WriteString(mutedStyle.Render("Updating symbol selection..."))
+		content.WriteString(mutedStyle.Render("⏳ Updating symbol selection...\n"))
+		content.WriteString(mutedStyle.Render("This may take a few moments as data is fetched."))
 	} else {
-		for _, rankedSymbol := range selectedSymbols {
+		// Create a slice to sort symbols for consistent display
+		symbols := make([]string, 0, len(selectedSymbols))
+		for symbol := range selectedSymbols {
+			symbols = append(symbols, symbol)
+		}
+
+		// Sort for consistent display
+		for i := 0; i < len(symbols)-1; i++ {
+			for j := i + 1; j < len(symbols); j++ {
+				if symbols[i] > symbols[j] {
+					symbols[i], symbols[j] = symbols[j], symbols[i]
+				}
+			}
+		}
+
+		for _, symbol := range symbols {
+			rankedSymbol := selectedSymbols[symbol]
+
 			// Render symbol with score
 			scorePercent := rankedSymbol.Score * 100
 			scoreStyle := successStyle
