@@ -160,16 +160,37 @@ type MarketsResponse struct {
 	Markets map[string]MarketData `json:"markets"`
 }
 
-// MarketData represents market configuration
+// MarketData represents market configuration from dYdX API
 type MarketData struct {
+	ClobPairID                string          `json:"clobPairId"`
 	Ticker                    string          `json:"ticker"`
-	MarketID                  int             `json:"marketId"`
 	Status                    string          `json:"status"`
-	BaseAsset                 string          `json:"baseAsset"`
-	QuoteAsset                string          `json:"quoteAsset"`
-	StepSize                  decimal.Decimal `json:"stepSize"`
-	TickSize                  decimal.Decimal `json:"tickSize"`
-	MinOrderSize              decimal.Decimal `json:"minOrderSize"`
+	OraclePrice               decimal.Decimal `json:"oraclePrice"`
+	PriceChange24H            decimal.Decimal `json:"priceChange24H"`
+	Volume24H                 decimal.Decimal `json:"volume24H"`
+	Trades24H                 int             `json:"trades24H"`
+	NextFundingRate           decimal.Decimal `json:"nextFundingRate"`
 	InitialMarginFraction     decimal.Decimal `json:"initialMarginFraction"`
 	MaintenanceMarginFraction decimal.Decimal `json:"maintenanceMarginFraction"`
+	OpenInterest              decimal.Decimal `json:"openInterest"`
+	AtomicResolution          int             `json:"atomicResolution"`
+	QuantumConversionExponent int             `json:"quantumConversionExponent"`
+	TickSize                  decimal.Decimal `json:"tickSize"`
+	StepSize                  decimal.Decimal `json:"stepSize"`
+	StepBaseQuantums          int64           `json:"stepBaseQuantums"`
+	SubticksPerTick           int64           `json:"subticksPerTick"`
+	MarketType                string          `json:"marketType"`
+	OpenInterestLowerCap      decimal.Decimal `json:"openInterestLowerCap"`
+	OpenInterestUpperCap      decimal.Decimal `json:"openInterestUpperCap"`
+	BaseOpenInterest          decimal.Decimal `json:"baseOpenInterest"`
+	DefaultFundingRate1H      decimal.Decimal `json:"defaultFundingRate1H"`
+}
+
+// MarketQuality represents quality metrics for a market
+type MarketQuality struct {
+	Symbol       string          // Market symbol (e.g., "BTC-USD")
+	Volume24h    decimal.Decimal // 24-hour trading volume
+	Volatility   float64         // Price volatility [0, 1]
+	Liquidity    float64         // Liquidity score [0, 1]
+	QualityScore float64         // Composite quality score [0, 1]
 }

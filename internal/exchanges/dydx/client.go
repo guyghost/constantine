@@ -55,6 +55,7 @@ type Client struct {
 	httpClient   *HTTPClient
 	pythonClient *PythonClient // For order placement via Python client
 	network      string        // "testnet" or "mainnet"
+	marketCache  *marketCache  // Cached market data
 }
 
 // NewClient creates a new dYdX client
