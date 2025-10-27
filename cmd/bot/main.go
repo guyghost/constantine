@@ -200,9 +200,10 @@ func botLogger() *logger.Logger {
 
 // autoSelectTradingSymbols automatically selects the best trading symbols for dYdX
 func autoSelectTradingSymbols(ctx context.Context, appConfig *config.AppConfig) []string {
-	// If symbols are already configured and not empty, use them
-	if len(appConfig.TradingSymbols) > 0 {
-		botLogger().Info("using configured trading symbols", "symbols", appConfig.TradingSymbols)
+	// If symbols are explicitly configured (via env var), use them
+	// Only skip auto-selection if TRADING_SYMBOLS env var was explicitly set
+	if tradingSymbols := os.Getenv("TRADING_SYMBOLS"); tradingSymbols != "" {
+		botLogger().Info("using explicitly configured trading symbols", "symbols", appConfig.TradingSymbols)
 		return appConfig.TradingSymbols
 	}
 
