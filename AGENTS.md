@@ -2,6 +2,13 @@
 
 ## Overview
 Constantine is a multi-exchange cryptocurrency trading bot built with a modular agent-based architecture. Each component acts as an autonomous agent responsible for specific aspects of the trading system.
+The OpenCode workflow automates:
+* Test planning (planner)
+* Test creation (test-writer)
+* Code implementation (implementer)
+* Code review and commit (reviewer)
+
+This ensures all new modules follow a Test-Driven Development (TDD) process with minimal manual coordination.
 
 ## Core Agents
 

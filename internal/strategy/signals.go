@@ -31,15 +31,19 @@ const (
 	SignalTypeWeak   SignalType = "weak"
 )
 
-// SignalGenerator generates trading signals
+// SignalGenerator generates trading signals with dynamic indicator weights
 type SignalGenerator struct {
-	config *config.Config
+	config           *config.Config
+	weightCalculator *WeightCalculator
+	indicatorWeights IndicatorWeights
 }
 
 // NewSignalGenerator creates a new signal generator
 func NewSignalGenerator(config *config.Config) *SignalGenerator {
 	return &SignalGenerator{
-		config: config,
+		config:           config,
+		weightCalculator: NewWeightCalculator(config),
+		indicatorWeights: IndicatorWeights{EMA: 0.35, RSI: 0.35, Volume: 0.15, BB: 0.15},
 	}
 }
 
@@ -72,6 +76,9 @@ func (sg *SignalGenerator) GenerateSignal(
 	currentLongEMA := longEMA[len(longEMA)-1]
 	currentRSI := rsi[len(rsi)-1]
 	currentPrice := prices[len(prices)-1]
+
+	// Calculate dynamic indicator weights based on current market conditions
+	sg.indicatorWeights = sg.weightCalculator.CalculateDynamicWeights(prices, volumes, currentRSI)
 
 	// Log indicator calculations
 	logger.Component("strategy").Debug("signal calculation",
@@ -273,49 +280,50 @@ func (sg *SignalGenerator) checkOrderbookImbalance(orderbook *exchanges.OrderBoo
 }
 
 // calculateSignalStrength calculates the strength of a signal (0.0 to 1.0)
-// IMPROVED: Enhanced weighting to ensure signals that pass validation are executed
+// Uses dynamic indicator weights that adapt to market conditions
 func (sg *SignalGenerator) calculateSignalStrength(
 	shortEMA, longEMA, rsi decimal.Decimal,
 	isBuy bool,
 ) float64 {
 	strength := 0.0
 
-	// EMA divergence strength (max 0.5)
-	// Increased from 0.4 to give more weight to EMA crossovers
+	// EMA divergence strength - weighted by dynamic EMA weight
 	emaDiff := shortEMA.Sub(longEMA).Abs()
 	emaStrength := 0.0
 	if !longEMA.IsZero() {
 		emaDivergence := emaDiff.Div(longEMA)
 		emaStrength, _ = emaDivergence.Mul(decimal.NewFromInt(100)).Float64()
 	}
-	if emaStrength > 0.5 {
-		emaStrength = 0.5
+	if emaStrength > 1.0 {
+		emaStrength = 1.0
 	}
+	emaStrength *= sg.indicatorWeights.EMA
+
 	strength += emaStrength
 
-	// RSI strength (max 0.5)
-	// Increased from 0.6 for better balance with other factors
+	// RSI strength - weighted by dynamic RSI weight
 	rsiFloat, _ := rsi.Float64()
 	var rsiStrength float64
 	if isBuy {
 		// For buy: the lower the RSI, the stronger the signal
-		rsiStrength = (sg.config.RSIOversold - rsiFloat) / sg.config.RSIOversold * 0.5
+		rsiStrength = (sg.config.RSIOversold - rsiFloat) / sg.config.RSIOversold
 	} else {
 		// For sell: the higher the RSI, the stronger the signal
-		rsiStrength = (rsiFloat - sg.config.RSIOverbought) / (100.0 - sg.config.RSIOverbought) * 0.5
+		rsiStrength = (rsiFloat - sg.config.RSIOverbought) / (100.0 - sg.config.RSIOverbought)
 	}
 
 	if rsiStrength < 0 {
 		rsiStrength = 0
 	}
-	if rsiStrength > 0.5 {
-		rsiStrength = 0.5
+	if rsiStrength > 1.0 {
+		rsiStrength = 1.0
 	}
+	rsiStrength *= sg.indicatorWeights.RSI
+
 	strength += rsiStrength
 
 	// Ensure minimum strength when signal passes validation
-	// If both EMA crossover AND RSI condition are met, boost confidence
-	// This handles cases where RSI is not deep in oversold/overbought territory
+	// This handles cases where one indicator is strong but weighted low
 	if strength < 0.3 {
 		strength = 0.3 // Minimum confidence for validated signals
 	}
@@ -327,6 +335,13 @@ func (sg *SignalGenerator) calculateSignalStrength(
 	if strength < 0.0 {
 		strength = 0.0
 	}
+
+	logger.Component("strategy").Debug("signal strength calculation",
+		"ema_strength", emaStrength,
+		"rsi_strength", rsiStrength,
+		"total_strength", strength,
+		"ema_weight", sg.indicatorWeights.EMA,
+		"rsi_weight", sg.indicatorWeights.RSI)
 
 	return strength
 }
