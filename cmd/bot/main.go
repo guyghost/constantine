@@ -98,6 +98,9 @@ func run() error {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
+	// Auto-select trading symbols if not configured
+	appConfig.TradingSymbols = autoSelectTradingSymbols(ctx, appConfig)
+
 	metricsServer := telemetry.NewServer(appConfig.TelemetryAddr)
 	if metricsServer != nil {
 		if err := metricsServer.Start(); err != nil {
@@ -193,6 +196,110 @@ func run() error {
 
 func botLogger() *logger.Logger {
 	return logger.Default().Component("bot")
+}
+
+// autoSelectTradingSymbols automatically selects the best trading symbols for dYdX
+func autoSelectTradingSymbols(ctx context.Context, appConfig *config.AppConfig) []string {
+	// If symbols are already configured and not empty, use them
+	if len(appConfig.TradingSymbols) > 0 {
+		botLogger().Info("using configured trading symbols", "symbols", appConfig.TradingSymbols)
+		return appConfig.TradingSymbols
+	}
+
+	// Check if auto-selection is enabled
+	autoSelectEnabled := getEnvBool("AUTO_SELECT_SYMBOLS", true)
+	if !autoSelectEnabled {
+		botLogger().Info("auto-selection disabled, using default symbols")
+		return []string{"BTC-USD", "ETH-USD"} // Fallback symbols
+	}
+
+	// Check if dYdX is enabled (required for symbol selection)
+	dydxCfg, ok := appConfig.Exchanges["dydx"]
+	if !ok || !dydxCfg.Enabled {
+		botLogger().Warn("dYdX not enabled, cannot auto-select symbols")
+		return []string{"BTC-USD", "ETH-USD"} // Fallback symbols
+	}
+
+	botLogger().Info("auto-selecting best trading symbols...")
+
+	// Create dYdX client for symbol selection
+	var dydxClient *dydx.Client
+	var err error
+
+	if dydxCfg.Mnemonic != "" {
+		dydxClient, err = dydx.NewClientWithMnemonic(dydxCfg.Mnemonic, 0)
+	} else {
+		dydxClient, err = dydx.NewClient(dydxCfg.APIKey, dydxCfg.APISecret)
+	}
+
+	if err != nil {
+		botLogger().Error("failed to create dYdX client for symbol selection", "error", err)
+		return []string{"BTC-USD", "ETH-USD"} // Fallback symbols
+	}
+
+	// Get auto-selection parameters from environment
+	maxSymbols := 10
+	if val := os.Getenv("AUTO_SELECT_MAX_SYMBOLS"); val != "" {
+		fmt.Sscanf(val, "%d", &maxSymbols)
+	}
+
+	minQuality := 0.70
+	if val := os.Getenv("AUTO_SELECT_MIN_QUALITY"); val != "" {
+		fmt.Sscanf(val, "%f", &minQuality)
+	}
+
+	// Create a context with timeout for symbol selection
+	selectCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	// Select best markets
+	markets, err := dydxClient.SelectBestMarkets(selectCtx, maxSymbols, minQuality)
+	if err != nil {
+		botLogger().Error("failed to select markets", "error", err)
+		return []string{"BTC-USD", "ETH-USD"} // Fallback symbols
+	}
+
+	if len(markets) == 0 {
+		botLogger().Warn("no markets found with specified quality threshold, using defaults")
+		return []string{"BTC-USD", "ETH-USD"} // Fallback symbols
+	}
+
+	// Extract symbols from markets
+	selectedSymbols := make([]string, 0, len(markets))
+	for _, market := range markets {
+		selectedSymbols = append(selectedSymbols, market.Symbol)
+		botLogger().Info("selected symbol",
+			"symbol", market.Symbol,
+			"quality", fmt.Sprintf("%.1f%%", market.QualityScore*100),
+			"volume", fmt.Sprintf("$%.1fM", toMillions(market.Volume24h)),
+			"liquidity", fmt.Sprintf("%.1f%%", market.Liquidity*100),
+			"volatility", fmt.Sprintf("%.1f%%", market.Volatility*100),
+		)
+	}
+
+	botLogger().Info("auto-selection complete",
+		"symbols", selectedSymbols,
+		"count", len(selectedSymbols),
+		"min_quality", fmt.Sprintf("%.0f%%", minQuality*100),
+	)
+
+	return selectedSymbols
+}
+
+// toMillions converts a decimal volume to millions
+func toMillions(volume interface{}) float64 {
+	var f float64
+
+	// Handle decimal type
+	switch v := volume.(type) {
+	case string:
+		fmt.Sscanf(v, "%f", &f)
+	default:
+		str := fmt.Sprintf("%v", v)
+		fmt.Sscanf(str, "%f", &f)
+	}
+
+	return f / 1_000_000
 }
 
 // initializeBot initializes all bot components
