@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"github.com/guyghost/constantine/internal/config"
+	"github.com/shopspring/decimal"
 )
 
 type SymbolData struct {
@@ -17,7 +17,7 @@ type SymbolData struct {
 
 type RankedSymbol struct {
 	Symbol      string
-	Score       float64 // Composite opportunity score [0, 1]
+	Score       float64         // Composite opportunity score [0, 1]
 	Potential   decimal.Decimal // Gain potential
 	Risk        decimal.Decimal // Risk assessment
 	SharpeRatio decimal.Decimal // Risk-adjusted return
@@ -336,7 +336,7 @@ func (ss *SymbolSelector) calculateStdDevFloat(values []float64) float64 {
 		mean += v
 	}
 	mean /= float64(len(values))
-	
+
 	sumSq := 0.0
 	for _, v := range values {
 		diff := v - mean
