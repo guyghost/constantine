@@ -335,7 +335,7 @@ docs/
 - [Dynamic Weights Documentation](./DYNAMIC_WEIGHTS.md)
 - [Symbol Selection Documentation](./SYMBOL_SELECTION.md)
 - [Strategy Guide](./QUICKSTART.md)
-- [Testing Guide](../TESTING_GUIDE.md)
+- [Testing Guide](TESTING_GUIDE.md)
 
 ## Support
 

@@ -311,7 +311,7 @@ L'implémentation utilise une approche hybride :
 
 - [Documentation dYdX v4](https://docs.dydx.xyz/)
 - [Client Python dYdX](https://github.com/dydxprotocol/v4-clients/tree/main/v4-client-py-v2)
-- [Documentation Détaillée](./internal/exchanges/dydx/README.md)
+- [Documentation Détaillée](../internal/exchanges/dydx/README.md)
 
 ## ⚠️ Avertissement
 
