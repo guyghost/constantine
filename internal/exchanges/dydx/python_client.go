@@ -7,11 +7,34 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 
 	"github.com/guyghost/constantine/internal/exchanges"
 	"github.com/shopspring/decimal"
 )
+
+// detectVirtualEnvPython detects and returns the path to the virtual environment Python executable
+func detectVirtualEnvPython() string {
+	// Common virtual environment locations relative to current working directory
+	venvPaths := []string{
+		"venv_dydx_py312/bin/python",    // Project root
+		"./venv_dydx_py312/bin/python",  // Current directory
+		"../venv_dydx_py312/bin/python", // If running from bin/
+	}
+
+	for _, path := range venvPaths {
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			continue
+		}
+		if _, err := os.Stat(absPath); err == nil {
+			return absPath
+		}
+	}
+
+	return "" // Not found, use default
+}
 
 // PythonClient wraps the official dYdX v4 Python client for order placement
 // This is a temporary solution until we have native Go proto support
@@ -35,7 +58,13 @@ type PythonClientConfig struct {
 func NewPythonClient(config *PythonClientConfig) (*PythonClient, error) {
 	pythonPath := config.PythonPath
 	if pythonPath == "" {
-		pythonPath = "python3"
+		// First try to detect virtual environment Python
+		if venvPython := detectVirtualEnvPython(); venvPython != "" {
+			pythonPath = venvPython
+		} else {
+			// Fall back to system python3
+			pythonPath = "python3"
+		}
 	}
 
 	// SECURITY FIX: Resolve and validate script path

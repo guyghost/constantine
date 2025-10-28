@@ -35,8 +35,9 @@ import asyncio
 from typing import Dict, Any
 
 try:
-    from v4_client_py import NodeClient, OrderFlags
-    from v4_client_py.clients.constants import Network
+    from dydx_v4_client.node.client import NodeClient
+    from dydx_v4_client import OrderFlags
+    from dydx_v4_client.network import Network
     HAS_DYDX = True
 except ImportError:
     HAS_DYDX = False
