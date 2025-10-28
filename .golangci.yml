@@ -1,8 +1,6 @@
 run:
   timeout: 5m
   issues-exit-code: 1
-  # Removed explicit go version to avoid typecheck issues with golangci-lint 1.61.0
-  # Let golangci-lint detect the Go version automatically
 
 linters:
   enable:
@@ -12,8 +10,7 @@ linters:
     - gosimple       # Simplifie le code
     - errcheck       # Vérifie les erreurs non gérées
     - ineffassign    # Détecte les assignations inefficaces
-    # typecheck disabled due to version conflicts with golangci-lint 1.61.0
-    # govet and staticcheck already catch most type issues
+    - typecheck      # Vérifie les types (Go 1.24 compatible with golangci-lint 1.62.0+)
     - gofmt          # Vérifie le formatage
     - revive         # Remplaçant rapide de golint
     
@@ -55,11 +52,6 @@ linters-settings:
         disabled: false
       - name: package-comments
         disabled: true  # Désactivé car peut être trop strict
-  
-  typecheck:
-    # Disable typecheck to avoid version conflicts with golangci-lint 1.61.0
-    # GoVet and other linters still check for type issues
-    skip-tests: true
 
 issues:
   max-same-issues: 50
