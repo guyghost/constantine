@@ -1,0 +1,38 @@
+# Code Owners
+# This file defines who is responsible for code in this repository
+# See https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for everything in the repo
+* @guyghost
+
+# CI/CD workflows and configuration
+/.github/ @guyghost
+/.github/workflows/ @guyghost
+/.pre-commit-config.yaml @guyghost
+/Makefile @guyghost
+
+# Documentation
+/docs/ @guyghost
+/*.md @guyghost
+
+# Go module files
+/go.mod @guyghost
+/go.sum @guyghost
+
+# Core trading logic
+/internal/strategy/ @guyghost
+/internal/execution/ @guyghost
+/internal/risk/ @guyghost
+
+# Exchange integrations
+/internal/exchanges/ @guyghost
+
+# Security-sensitive files
+/.env.example @guyghost
+/.env.op.template @guyghost
+/internal/config/ @guyghost
+
+# Build and deployment
+/cmd/ @guyghost
+/scripts/ @guyghost
+/docker-compose*.yml @guyghost
