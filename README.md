@@ -1,6 +1,7 @@
 # Constantine Trading Bot
 
 [![CI](https://github.com/guyghost/constantine/workflows/CI/badge.svg)](https://github.com/guyghost/constantine/actions/workflows/ci.yml)
+[![Security](https://github.com/guyghost/constantine/workflows/Security%20Scanning/badge.svg)](https://github.com/guyghost/constantine/actions/workflows/security.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/guyghost/constantine)](https://goreportcard.com/report/github.com/guyghost/constantine)
 [![codecov](https://codecov.io/gh/guyghost/constantine/branch/main/graph/badge.svg)](https://codecov.io/gh/guyghost/constantine)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/guyghost/constantine)](go.mod)
@@ -149,8 +150,9 @@ LOG_SENSITIVE_DATA=false
 
 - [🚀 Guide de démarrage rapide](docs/QUICKSTART.md)
 - [🏗️ Architecture multi-agents](AGENTS.md)
-- [🔐 Gestion des secrets & CI](docs/SECRETS.md) • [CI Integration](docs/CI.md)
+- [🔐 Gestion des secrets & CI](docs/SECRETS.md) • [CI Integration](docs/CI.md) • [CI/CD Pipeline](docs/CI_PIPELINE.md)
 - [📊 État des exchanges](docs/EXCHANGE_STATUS.md)
+- [🔒 Security Policy](SECURITY.md)
 
 ### Exchanges
 
@@ -289,37 +291,52 @@ make vulncheck
 
 ### Intégration Continue (CI)
 
-Le projet utilise GitHub Actions avec 5 jobs parallèles pour assurer la qualité du code:
+Le projet utilise GitHub Actions avec 5 workflows principaux pour assurer la qualité du code:
 
-1. **Validation** - Vérifie le formatage (gofmt), go vet, et go.mod/go.sum
-2. **Tests** - Exécute les tests avec race detector et génère le coverage (uploadé vers Codecov)
-3. **Linting** - Analyse statique avec golangci-lint (19 linters activés)
-4. **Build** - Compile pour Linux, macOS, et Windows (amd64/arm64)
-5. **Security** - Scan des vulnérabilités avec govulncheck
+1. **CI Principal** - Validation, tests, linting, build multi-plateforme, et sécurité
+2. **Security** - Scans de sécurité complets (govulncheck, gosec, Trivy, Nancy, SBOM, licenses)
+3. **Benchmarks** - Suivi des performances et détection de régressions
+4. **Code Quality** - Analyse de documentation, complexité, duplication, et code mort
+5. **Release** - Builds automatisés multi-plateformes avec changelogs
 
-Les rapports de coverage sont automatiquement uploadés vers [Codecov](https://codecov.io/gh/guyghost/constantine) après chaque exécution des tests. Localement, les rapports sont générés dans `coverage.out` et `coverage.html`.
+**Fonctionnalités avancées:**
+- ✅ Coverage automatique uploadé vers [Codecov](https://codecov.io/gh/guyghost/constantine)
+- ✅ Seuil de couverture minimum de 40% (configurable)
+- ✅ Génération de SBOM (Software Bill of Materials) pour la sécurité de la chaîne d'approvisionnement
+- ✅ Vérification de conformité des licences
+- ✅ Détection de régressions de performance (alerte à +150%)
+- ✅ Dependabot pour mises à jour automatiques des dépendances
+- ✅ Pre-commit hooks pour validation locale
+- ✅ Scans de sécurité multi-couches quotidiens
 
 Toutes les vérifications CI peuvent être exécutées localement:
 
 ```bash
-# Simuler le job de validation CI
-make ci-validate
-
-# Simuler le job de tests CI (génère coverage.out)
-make ci-test
-
-# Simuler le job de linting CI
-make ci-lint
-
-# Simuler le job de build CI
-make ci-build
-
-# Simuler le job de sécurité CI
-make ci-security
-
 # Exécuter TOUS les jobs CI localement
 make ci
+
+# Simuler les jobs individuels
+make ci-validate    # Formatage, vet, mod
+make ci-test        # Tests avec coverage
+make ci-lint        # golangci-lint
+make ci-build       # Build multi-plateforme
+make ci-security    # Scans de vulnérabilités
+
+# Nouvelles vérifications de qualité
+make quality        # Code mort, duplication, complexité
+make audit          # Audit de sécurité complet
+make sbom           # Générer SBOM
+make deadcode       # Détecter code inutilisé
+make duplication    # Détecter code dupliqué
+make complexity     # Analyser complexité
+
+# Pre-commit hooks (nécessite Python)
+pip install pre-commit
+make pre-commit     # Setup une fois
+pre-commit run --all-files
 ```
+
+**Documentation complète:** Voir [docs/CI_PIPELINE.md](docs/CI_PIPELINE.md) pour les détails complets de la pipeline CI/CD.
 
 La CI s'exécute automatiquement sur les branches `main` et toutes les pull requests. Les tests sont exécutés sur Go 1.23 et 1.24 pour assurer la compatibilité.
 

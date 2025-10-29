@@ -1,0 +1,92 @@
+name: Security Vulnerability
+description: Report a security vulnerability (privately)
+title: "[SECURITY] "
+labels: ["security", "critical"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ⚠️ **SECURITY NOTICE**
+        
+        If you've found a security vulnerability, please report it responsibly:
+        
+        1. **DO NOT** create a public issue
+        2. **DO NOT** disclose the vulnerability publicly
+        3. Email the maintainers directly at: [security email]
+        4. Or use GitHub's private security advisory feature
+        
+        If you still want to use this template, ensure no sensitive details are exposed.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Vulnerability Description
+      description: Brief, non-sensitive description of the security issue
+      placeholder: "There is a potential issue in..."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Estimated Severity
+      options:
+        - Low
+        - Medium
+        - High
+        - Critical
+    validations:
+      required: true
+
+  - type: dropdown
+    id: type
+    attributes:
+      label: Vulnerability Type
+      options:
+        - Authentication/Authorization
+        - Data Exposure
+        - Injection
+        - Cryptographic Issue
+        - Dependency Vulnerability
+        - Configuration Issue
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Potential Impact
+      description: What could an attacker potentially do?
+      placeholder: "An attacker could..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: mitigation
+    attributes:
+      label: Suggested Mitigation
+      description: How could this be fixed?
+      placeholder: "This could be mitigated by..."
+
+  - type: checkboxes
+    id: disclosure
+    attributes:
+      label: Responsible Disclosure
+      options:
+        - label: I have NOT publicly disclosed this vulnerability
+          required: true
+        - label: I am willing to work with maintainers on a fix
+          required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        **Next Steps:**
+        1. Maintainers will acknowledge receipt within 48 hours
+        2. We will investigate and confirm the vulnerability
+        3. We will develop and test a fix
+        4. We will coordinate disclosure timeline with you
+        
+        Thank you for helping keep Constantine secure! 🔒

@@ -14,6 +14,7 @@
 
 # Output of the go coverage tool
 *.out
+coverage.html
 
 .claude
 
@@ -53,3 +54,21 @@ secrets.json
 *.bak
 *.backup
 bin/
+
+# CI/CD artifacts
+sbom.json
+*.sarif
+licenses.txt
+*-report.txt
+deadcode-report.txt
+duplication-report.txt
+complexity-report.txt
+coverage-details.md
+
+# Pre-commit
+.secrets.baseline
+
+# Temporary files
+tmp/
+temp/
+*.tmp

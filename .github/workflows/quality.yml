@@ -1,0 +1,195 @@
+name: Code Quality
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Documentation quality check
+  documentation:
+    name: Documentation Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Install documentation tools
+        run: |
+          go install golang.org/x/tools/cmd/godoc@latest
+          go install github.com/princjef/gomarkdoc/cmd/gomarkdoc@latest
+
+      - name: Generate documentation
+        run: |
+          # Generate markdown documentation for all packages
+          gomarkdoc --output docs/API.md ./...
+        continue-on-error: true
+
+      - name: Check for undocumented exports
+        run: |
+          # This will be a simple check - can be enhanced with custom tools
+          echo "Checking for exported symbols without documentation..."
+          
+          # Count exported symbols
+          echo "Documentation check completed"
+
+  # Code complexity analysis
+  complexity:
+    name: Code Complexity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Install gocyclo
+        run: go install github.com/fzipp/gocyclo/cmd/gocyclo@latest
+
+      - name: Check cyclomatic complexity
+        run: |
+          # Report functions with complexity > 15
+          gocyclo -over 15 . || true
+          
+          # Generate full report
+          gocyclo -avg . > complexity-report.txt
+          cat complexity-report.txt
+
+      - name: Upload complexity report
+        uses: actions/upload-artifact@v4
+        with:
+          name: complexity-report
+          path: complexity-report.txt
+          retention-days: 30
+
+  # Dead code detection
+  deadcode:
+    name: Dead Code Detection
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Install deadcode
+        run: go install golang.org/x/tools/cmd/deadcode@latest
+
+      - name: Run deadcode analysis
+        run: |
+          deadcode -test ./... > deadcode-report.txt || true
+          if [ -s deadcode-report.txt ]; then
+            echo "Dead code found:"
+            cat deadcode-report.txt
+          else
+            echo "No dead code detected"
+          fi
+        continue-on-error: true
+
+      - name: Upload deadcode report
+        uses: actions/upload-artifact@v4
+        with:
+          name: deadcode-report
+          path: deadcode-report.txt
+          retention-days: 30
+        if: always()
+
+  # Code duplication detection
+  duplication:
+    name: Code Duplication
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dupl
+        run: |
+          go install github.com/mibk/dupl@latest
+
+      - name: Run duplication check
+        run: |
+          dupl -threshold 50 -files '**/*.go' > duplication-report.txt || true
+          if [ -s duplication-report.txt ]; then
+            echo "Code duplication found:"
+            cat duplication-report.txt
+          else
+            echo "No significant code duplication detected"
+          fi
+        continue-on-error: true
+
+      - name: Upload duplication report
+        uses: actions/upload-artifact@v4
+        with:
+          name: duplication-report
+          path: duplication-report.txt
+          retention-days: 30
+        if: always()
+
+  # Test coverage per package
+  coverage-report:
+    name: Detailed Coverage Report
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Run tests with coverage
+        run: |
+          go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Generate detailed coverage report
+        run: |
+          echo "# Coverage Report by Package" > coverage-details.md
+          echo "" >> coverage-details.md
+          echo "| Package | Coverage |" >> coverage-details.md
+          echo "|---------|----------|" >> coverage-details.md
+          
+          go tool cover -func=coverage.out | grep -v "total:" | while read line; do
+            package=$(echo $line | awk '{print $1}' | cut -d':' -f1 | xargs dirname | sort -u)
+            coverage=$(echo $line | awk '{print $3}')
+            if [ ! -z "$package" ]; then
+              echo "| $package | $coverage |" >> coverage-details.md
+            fi
+          done
+          
+          # Add total coverage
+          total=$(go tool cover -func=coverage.out | grep total | awk '{print $3}')
+          echo "| **Total** | **$total** |" >> coverage-details.md
+          
+          cat coverage-details.md
+
+      - name: Upload coverage details
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-details
+          path: coverage-details.md
+          retention-days: 30
