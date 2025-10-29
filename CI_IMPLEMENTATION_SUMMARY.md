@@ -185,8 +185,8 @@ This document summarizes the comprehensive CI/CD enhancements made to Constantin
 | Linting | clippy | golangci-lint (19 linters) |
 | Testing | cargo test | go test with race detector |
 | Benchmarks | cargo bench | go test -bench with tracking |
-| Coverage | tarpaulin | go test -cover with thresholds |
-| SBOM | cargo-sbom | CycloneDX |
+| Coverage | tarpaulin/cargo-llvm-cov | go test -cover with thresholds |
+| SBOM | cargo-bom (3rd party) | CycloneDX |
 | Docs | cargo doc | godoc + checks |
 | Pre-commit | Yes | Yes (configured) |
 | Releases | cargo-release | GitHub Actions automation |
